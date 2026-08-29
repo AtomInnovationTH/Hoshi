@@ -3,6 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<!-- §B5 — installable/full-screen on iPadOS (WebClip / Add to Home Screen): no Safari chrome, translucent status bar over the sky -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Hoshi">
+<meta name="theme-color" content="#0e1219">
 <title>Hoshi-no-Tani — The Valley of Stars</title>
 <style>
   :root{
@@ -174,7 +180,7 @@
   <div class="row"><label>FPS cap</label>
     <div class="seg" id="fpsSeg">
       <button type="button" data-f="30">30</button><button type="button" data-f="60" class="on">60</button>
-      <button type="button" data-f="120">120</button><button type="button" data-f="0">off</button>
+      <button type="button" id="fps120" data-f="120">120</button><button type="button" data-f="0">off</button>
     </div></div>
   <div class="row"><label>Grass density</label><input id="qDens" type="range" min="20" max="140" value="100"><span class="val" id="qDensV">100</span></div>
   <div class="row"><label>Render scale</label><input id="qScale" type="range" min="60" max="150" value="100"><span class="val" id="qScaleV">100</span></div>
@@ -207,7 +213,8 @@
   <div class="row"><label>Ground effect</label><input id="pGeff" type="range" min="0" max="100" value="80"><span class="val" id="pGeffV">80</span></div>
   <p class="note">Press <b>T</b> to summon the train, <b>1</b>&#8211;<b>4</b> for quality presets,
     <b>Tab</b> hides the hud, <b>H</b> closes this panel. <b>P</b> pauses the world.</p>
-</div>
+  <p class="note" id="ver" style="opacity:.5">three r180 · V10B</p>
+ </div>
 
 <div id="flash"></div>
 <div id="toast"></div>
@@ -427,7 +434,7 @@ const P = {
   // sky & air
   skyZenith:'#4E80B4', skyUpper:'#7BA9CE', skyMid:'#A8CAE0', skyHorizon:'#E4DAC2',
   skyHorizonSun:'#FBE2AE', sunGlow:'#FFF1CE', sunDisc:'#FFFAEA', skyAnti:'#C8D4D6',
-  haze:'#A9BCC7', mist:'#D6DDD4',
+  haze:'#CBB894', mist:'#D6DDD4',
   // clouds
   cloudTop:'#FFF8EC', cloudBody:'#F6E7D2', cloudTerm:'#E8CFB4', cloudUnder:'#B7ACC3',
   cloudCore:'#9791B0', cloudRim:'#FFEFBE', cirrus:'#F3E6D6',
@@ -438,7 +445,7 @@ const P = {
   // terrain
   tLit:'#93B159', tMid:'#6A924F', tShade:'#456A54', tHollow:'#33564F',
   ridgeNear:'#8FA9A2', ridgeMid:'#9CB0B4', ridgeFar:'#AEBCC9', ridgeFurthest:'#BFC8D4',
-  pathLit:'#C9AD80', pathShade:'#7A664D', rockLit:'#B4A794', rockShade:'#5F5C58',
+  pathLit:'#C9AD80', pathShade:'#7A664D', rockLit:'#C5B69C', rockShade:'#4E4C49',
   bounce:'#AA9C64',
   // river
   wShallow:'#A5CBBE', wMid:'#5F9CA0', wDeep:'#2F5F6C', wDeepShade:'#274E5C',
@@ -462,7 +469,7 @@ const P = {
   brass:'#CBA44E', carBody:'#3C6152', carBand:'#EADEC2', carWin:'#FFDE9E',
   smokeNew:'#F4EDE3', smokeOld:'#B5ACB6',
   // light
-  sun:'#FFD79C', ambSky:'#9EC6E6', ambGround:'#AA9C64', shadowTint:'#5C6E9E',
+  sun:'#FFC678', ambSky:'#A6BFD8', ambGround:'#C19A55', shadowTint:'#5E5C90',
 };
 
 // hex -> THREE.Color (linear) and -> vec3 literal for glsl injection
@@ -1710,6 +1717,73 @@ function cragFrozenAt(wx, wz, capH, skirtBase){
       }
     }
   }
+  /*  §V10B B1 — RIM3, the SILHOUETTE PASS: the knee-nose idiom SCALED UP to
+      the outer wall.  At 300–900 m the wall reads as a smooth pow-profile
+      tube wearing 1 m knee jags; what distant rock needs is FACET RHYTHM —
+      vertical pilaster columns, 2–4 m proud, with crisp box shoulders so the
+      13.5° sun alternates bold lit/shade strokes down the wall.  Same laws
+      as the knee block: az-quantised cells (22 ≈ 16.4° ≈ 6.9 m at d 24,
+      golden-fract draws per cell, floor/fract only — CPU-deterministic),
+      OUT only (dp -=; a bite is the gate-trap class), the pad az window
+      skipped (S4-protective), the five shelf windows yield ×(1−shProt), and
+      the route cross-section composes OVER by max/min — treads and pad stay
+      immune by construction, risers gain crisp jags.  Band: ramps in past
+      the cap hold (15.2→17.0, so the rim line grows broken towers the knee
+      band's 0.9 m could never give it) and each column FOOT dies at its own
+      golden-staggered radius (26–30 → 30–33) — no shared cutoff ring (the
+      §28.0 ring lesson applied to relief).  Composed footprint stays inside
+      the existing reach: columns spent by d 33, buttresses by 42, freeze
+      edge 46, discard 90 — the §28.0 apron/curtain radii (91.5/140) are
+      re-derived VALID from this shape, not inherited (LAW 5; §31.V10B).
+      Rides route2; ?rim3=0 restores the V9S-P default field byte-identically
+      (this block is the ONLY rim3 consumer — LAW 2).                        */
+  if(State.rim3 && State.route2 && d > 15.2 && d < 33.0){
+    let daR = az - (CRAG_ROUTE.ax + CRAG_ROUTE.finTurn);
+    daR = Math.atan2(Math.sin(daR), Math.cos(daR));
+    if(Math.abs(daR)*CRAG_ROUTE.padRC >= CRAG_ROUTE.padL + 2.6){
+      const fA = ((az/TAU) % 1 + 1) % 1;
+      const ci = Math.floor(fA*22), fc = fA*22 - ci;
+      const s2 = (ci*0.7548777 + 0.41) % 1;
+      if(s2 > 0.34){
+        const s1 = (ci*0.6180339887 + 0.57) % 1;
+        const s3 = (ci*0.3819660113 + 0.11) % 1;
+        const box = smoothstep(0.05, 0.14, fc) * (1 - smoothstep(0.86, 0.95, fc));
+        const band = smoothstep(15.2, 17.0, d)
+                   * (1 - smoothstep(26.0 + 4.0*s3, 30.0 + 3.0*s3, d));
+        /*  §V10B B1b — the checkpoint-2 "bolder" verdict, two moves:
+            (1) OUTCROP SWELL: a low-frequency az envelope (integer-harmonic
+            cos — seamless on the circle, the §27-V5-T2 law) modulates column
+            depth 0.3–1.5×, so a few sectors bulge as PRONOUNCED outcrop
+            masses (up to ~6 m proud) while others stay shy — the even
+            22-cell rhythm read as a fluted tube at range, not as rock.
+            (2) THE BROW: columns jut a further 1.3 m in the top band
+            (15.2→16.4 on, spent 19.5→22), then step BACK to the plain
+            column below — under the 13.5° sun the step-back line holds a
+            hard shadow and the rim reads as overhanging brows (a true
+            overhang cannot exist in a single-valued heightfield; the brow
+            step is the honest illusion, same family as the caprock lips). */
+        const outc = Math.min(1.5, Math.max(0.3,
+          0.75 + 0.45*Math.cos(az*3.0 + 0.8) + 0.30*Math.cos(az*1.0 + 2.1)));
+        const brow = smoothstep(15.2, 16.4, d) * (1 - smoothstep(19.5, 22.0, d));
+        /*  §V10B B1b(2) — columns yield over the WHOLE shelf-prop seat reach:
+            shProt's radial window ends at rOut+1.5, but the V7R4-C3 seat()
+            walks rIn → rOut+2.0 hunting slope < 0.30 — and a crisp column
+            CROWN is a flat-spot magnet (the az-30 flag re-seated onto a
+            pedestal spike, dg +1.6..+2.5 vs its ledge).  A rim3-private
+            yield extends each shelf gaussian to rOut+3.5 so every candidate
+            the scanner can visit stays natural rock.                        */
+        let shSeat = 0;
+        for(let s9 = 0; s9 < CRAG_SHELVES.length; s9++){
+          if(shM[s9] === 0) continue;
+          const shR = CRAG_SHELVES[s9];
+          const w9 = shM[s9] * smoothstep(shR[1]-1.5, shR[1]-0.2, d)
+                   * (1 - smoothstep(shR[2]+2.0, shR[2]+3.5, d));
+          if(w9 > shSeat) shSeat = w9;
+        }
+        dp -= ((2.0 + 2.0*s1)*outc + 1.3*brow) * box * band * (1 - Math.max(shProt, shSeat));
+      }
+    }
+  }
   const wall = cragWall(dp);
   let frozen = d <= 15 ? capH : capH*wall + skirtBase*(1-wall);
   /*  §36S V9S — the route owns the surface under route2 (constructed
@@ -1855,6 +1929,13 @@ let PATH_DF = null;
 function bakeSplat(){
   const R = CFG.dataRes;
   PATH_DF = makeDF(PATH_PTS.map((p,i)=>({x:p[0], z:p[1], t:i/PATH_PTS.length})), 384);
+  /*  §V10B B1b — the S0 gate's crag radius, hoisted once for the mouth fade
+      (LAW 2: derived from the routeStations table, never re-typed).         */
+  let _s0r9 = 0;
+  if(State.rim3 && State.route2 && window.__CRAGCAP){
+    const st9 = routeStations(window.__CRAGCAP.capH, window.__CRAGCAP.skirtBase);
+    if(st9.length) _s0r9 = Math.hypot(st9[0].x - CRAG_POS.x, st9[0].z - CRAG_POS.z);
+  }
   for(let y=0;y<R;y++){
     const wz=((y+0.5)/R)*WS-HALF;
     for(let x=0;x<R;x++){
@@ -1944,6 +2025,36 @@ function bakeSplat(){
         const CCc = window.__CRAGCAP;   // §29.1 T0.1: consume CRAG_POS; §36S: route2 reads CRAG_ROUTE (LAW 2)
         if(State.route2){ const rc = CRAG_ROUTE.eval(wx, wz, CRAG_POS.x, CRAG_POS.z, CCc.capH, CCc.skirtBase, 0); if(rc) pcut = rc.cut; }
         else { const pc = CRAG_PATH.eval(wx, wz, CRAG_POS.x, CRAG_POS.z, CCc.capH, CCc.skirtBase); if(pc) pcut = pc.cut; }
+        /*  §V10B B1b (checkpoint-2 verdicts, both rim3-gated so ?rim3=0
+            re-bakes the V9S-P splat byte-identically):
+            (a) THE MOUTH FADE — "dirt→grass at the lower torii could be
+            smoother": the trodden-earth mask eases out over ~7 m of crag
+            radius beyond the S0 gate, so the tread grows out of meadow and
+            hands the line to the desire path instead of switching off.
+            (b) THE MISMATCH MOW — "grass floating ~10 cm on the lower
+            cliff": blades root on the 2.34 m FIELD while the eye sees the
+            analytic mesh; where the two surfaces disagree ≥0.25 m the
+            blades retire (the V8S corridor-mow lesson, generalised to the
+            whole d 13–34 band — rim3 columns made the disagreement wider). */
+        if(State.rim3){
+          if(pcut > 0 && _s0r9 > 0 && dcrag > _s0r9 - 0.5)
+            pcut *= 1 - smoothstep(_s0r9 - 0.5, _s0r9 + 6.5, dcrag);
+          if(dcrag > 13 && dcrag < 34){
+            const dh9 = Math.abs(cragFrozenAt(wx, wz, CCc.capH, CCc.skirtBase) - h);
+            mask *= 1 - smoothstep(0.25, 0.60, dh9);
+            /*  §V10B B1c — the 60° ceiling (checkpoint-2b: "no grass on
+                vertical or near vertical, maybe limit to 60 degrees"): the
+                FIELD normal used by the legacy slope gates is texel-blurred
+                and under-reads the analytic wall, so blades survived on the
+                steeps.  Gate on the EQUATION's own gradient: fade from 45°
+                (g 1.0), gone by 60° (g 1.73).                               */
+            const e9 = 0.5;
+            const g9 = Math.hypot(
+              cragFrozenAt(wx + e9, wz, CCc.capH, CCc.skirtBase) - cragFrozenAt(wx - e9, wz, CCc.capH, CCc.skirtBase),
+              cragFrozenAt(wx, wz + e9, CCc.capH, CCc.skirtBase) - cragFrozenAt(wx, wz - e9, CCc.capH, CCc.skirtBase)) / (2*e9);
+            mask *= 1 - smoothstep(1.0, 1.73, g9);
+          }
+        }
       }
         if(pcut > 0) mask = lerp(mask, 0.02, pcut);
       /*  §31.V7-d — the shrine courtyard + the sandō walk are trodden bare
@@ -1979,9 +2090,16 @@ function bakeSplat(){
       let dpw = 0;
       if(State.route2 && Math.hypot(wx - ROUTE_DESIRE.gx, wz - ROUTE_DESIRE.gz) < ROUTE_DESIRE.gr){
         const dq = desireAt(wx, wz);
-        const wD = lerp(ROUTE_DESIRE.w0, ROUTE_DESIRE.w1, dq.f) + 1.4;
-        dpw = (1 - smoothstep(wD*0.5, wD + 1.0, dq.d)) * lerp(ROUTE_DESIRE.s0, ROUTE_DESIRE.s1, dq.f);
-        if(dpw > 0) mask = lerp(mask, mask*0.45, dpw);
+        /*  §V10B B1c — checkpoint-2b: "a gradual fading path from the bottom
+            torii towards river/sun/town".  Under rim3 the near-gate endpoint
+            strengthens (w1 1.10→1.85, s1 0.50→0.92, wash floor 0.45→0.30) in
+            ALL THREE consumers (FS strip + VS mow twin + this wash) so the
+            tread hands off to a VISIBLE trail that fades over its 35 m run.
+            rim3=0 keeps the V9S-P faint line byte-identically.              */
+        const w1e = State.rim3 ? 1.85 : ROUTE_DESIRE.w1, s1e = State.rim3 ? 0.92 : ROUTE_DESIRE.s1;
+        const wD = lerp(ROUTE_DESIRE.w0, w1e, dq.f) + 1.4;
+        dpw = (1 - smoothstep(wD*0.5, wD + 1.0, dq.d)) * lerp(ROUTE_DESIRE.s0, s1e, dq.f);
+        if(dpw > 0) mask = lerp(mask, mask*(State.rim3 ? 0.30 : 0.45), dpw);
       }
       // dryness: seed-head yellow on exposed, south-facing, well-drained ground
       const dry = clamp(
@@ -2606,7 +2724,10 @@ ${State.route2 ? (() => {
         if(windT <= ${(CRAG_ROUTE.finTurn + 0.28).toFixed(7)}) bestD = min(bestD, abs(dcr - ${CRAG_ROUTE.finR.toFixed(2)}));
         float daQ = mod(az - ${(CRAG_ROUTE.ax + CRAG_ROUTE.finTurn).toFixed(7)} + 3.1415927, 6.2831853) - 3.1415927;
         if(abs(daQ)*${CRAG_ROUTE.padRC.toFixed(2)} < ${CRAG_ROUTE.padL.toFixed(2)}) bestD = min(bestD, abs(dcr - ${CRAG_ROUTE.padRC.toFixed(2)}) - ${(CRAG_ROUTE.padHW - CRAG_ROUTE.halfW).toFixed(2)});
-        treadW = (1.0 - smoothstep(0.80, 1.55, bestD)) * crag * walkK;
+${State.rim3 ? `        float mQ = smoothstep(${(CRAG_ROUTE.torR - 8.0).toFixed(1)}, ${(CRAG_ROUTE.torR + 2.0).toFixed(1)}, alQ);
+        treadW = (1.0 - smoothstep(0.80 - 0.35*mQ, 1.55 + 2.6*mQ, bestD)) * crag * walkK;
+        treadW *= 1.0 - smoothstep(${(CRAG_ROUTE.torR - 1.0).toFixed(1)}, ${(CRAG_ROUTE.torR + 5.5).toFixed(1)}, alQ);` :
+`        treadW = (1.0 - smoothstep(0.80, 1.55, bestD)) * crag * walkK;`}
       }`;
       })() : `
       float windT = mod(az - ${CRAG_PATH.bear0.toFixed(7)}, 6.2831853);
@@ -2706,8 +2827,8 @@ ${State.route2 ? (() => { const D = ROUTE_DESIRE;
      strength grow toward the gate; pn2 frays the edge). */
   if(distance(P.xz, vec2(${D.gx.toFixed(2)}, ${D.gz.toFixed(2)})) < ${D.gr.toFixed(1)}){
     float dD = 9e9, fD = 0.0;${seg(0)}${seg(1)}${seg(2)}
-    float wDp = mix(${D.w0.toFixed(2)}, ${D.w1.toFixed(2)}, fD);
-    float sDp = mix(${D.s0.toFixed(2)}, ${D.s1.toFixed(2)}, fD);
+    float wDp = mix(${D.w0.toFixed(2)}, ${(State.rim3 ? 1.85 : D.w1).toFixed(2)}, fD);
+    float sDp = mix(${D.s0.toFixed(2)}, ${(State.rim3 ? 0.92 : D.s1).toFixed(2)}, fD);
     float mDp = (1.0 - smoothstep(wDp*0.5, wDp, dD + pn2(P.xz*1.9 + 5.3)*0.28)) * sDp;
     if(mDp > 0.003){
       vec3 dEarth = mix(${C.pathLit}, ${C.tShade}, 0.30);
@@ -4015,8 +4136,18 @@ void main(){
       if(wS <= ${(CRAG_ROUTE.finTurn + 0.28).toFixed(7)}) bdS = min(bdS, abs(dcS - ${CRAG_ROUTE.finR.toFixed(2)}));
       float daS = mod(atan(dvS.y, dvS.x) - ${(CRAG_ROUTE.ax + CRAG_ROUTE.finTurn).toFixed(7)} + 3.1415927, 6.2831853) - 3.1415927;
       if(abs(daS)*${CRAG_ROUTE.padRC.toFixed(2)} < ${CRAG_ROUTE.padL.toFixed(2)}) bdS = min(bdS, abs(dcS - ${CRAG_ROUTE.padRC.toFixed(2)}) - ${(CRAG_ROUTE.padHW - CRAG_ROUTE.halfW).toFixed(2)});
-      if(bdS < 1.45){ degenerate(); return; }
-    }
+${State.rim3 ? `      float mk9 = smoothstep(${(CRAG_ROUTE.torR - 7.0).toFixed(1)}, ${(CRAG_ROUTE.torR + 3.0).toFixed(1)}, alS);
+      float fray9 = (hash12(wxz*1.91 + 4.7) - 0.5)*2.2*mk9;
+      if(bdS + fray9 < 1.45){ degenerate(); return; }
+      mask *= mix(1.0, 0.25 + 0.75*smoothstep(1.45, 5.2, bdS + fray9), mk9);
+      if(dcS < 34.0){
+` : `      if(bdS < 1.45){ degenerate(); return; }
+${''}`}${State.rim3 ? `        float e9c = 2.4;
+        float gx9c = terrainHLod(wxz + vec2(e9c, 0.0), 0.0) - terrainHLod(wxz - vec2(e9c, 0.0), 0.0);
+        float gz9c = terrainHLod(wxz + vec2(0.0, e9c), 0.0) - terrainHLod(wxz - vec2(0.0, e9c), 0.0);
+        if(length(vec2(gx9c, gz9c)) > 4.8){ degenerate(); return; }
+      }
+` : ''}    }
   }`;
   })() : `
   /*  s35 V8S - the BENCH CORRIDOR mow: the 4.7 m splat texel bakes the ladder
@@ -4059,10 +4190,11 @@ ${State.route2 ? (() => { const D = ROUTE_DESIRE;
      line (same table as the terrain strip). */
   if(distance(wxz, vec2(${D.gx.toFixed(2)}, ${D.gz.toFixed(2)})) < ${D.gr.toFixed(1)}){
     float dD = 9e9, fD = 0.0;${seg(0)}${seg(1)}${seg(2)}
-    float wDp = mix(${D.w0.toFixed(2)}, ${D.w1.toFixed(2)}, fD) + 0.25;
-    float sDp = mix(${D.s0.toFixed(2)}, ${D.s1.toFixed(2)}, fD);
+    float wDp = mix(${D.w0.toFixed(2)}, ${(State.rim3 ? 1.85 : D.w1).toFixed(2)}, fD) + 0.25;
+    float sDp = mix(${D.s0.toFixed(2)}, ${(State.rim3 ? 0.92 : D.s1).toFixed(2)}, fD);
     float mDp = (1.0 - smoothstep(wDp*0.4, wDp, dD + (hash12(wxz*1.73 + 3.1) - 0.5)*0.55)) * sDp;
-    mask *= 1.0 - 0.85*mDp;
+    mask *= 1.0 - 0.85*mDp;${State.rim3 ? `
+    fade *= 1.0 - 0.55*mDp;` : ''}
   }`; })() : ``}
   if(mask < 0.035){ degenerate(); return; }
   float thr  = bladeKeep*(0.78 + 0.22*mask);
@@ -6882,7 +7014,12 @@ function buildPathDressing(){
         as da grows — both seats sit ≥0.75 m outboard of it).                */
     { const azK = R9.ax + R9.finTurn;
       const pAt = (da, rr) => ({ x: cx + Math.cos(azK + da)*rr, z: cz + Math.sin(azK + da)*rr });
-      { const p = pAt(0.115, 16.15), py = gY(p.x, p.z);      // windbell post (item-5 legible part list)
+      /*  §V10B B1c — the checkpoint-2b order: "remove the lantern at the
+          zigzag turn" — the bell-under-gable post read as an unseated stone
+          lantern from the walk.  The windbell goes (mesh here, its gust note
+          in audio, its journal line below); the prayer-flag echo stays.
+          rim3=0 rebuilds the V9S-P nook verbatim.                           */
+      if(!State.rim3){ const p = pAt(0.115, 16.15), py = gY(p.x, p.z);      // windbell post (item-5 legible part list)
         pcyl(M, [p.x, py, p.z], [p.x, py+2.6, p.z], 0.10, 0.09, 4, LC('timber'), 5, false, false);
         pbox(M, p.x, py+2.10, p.z, 0.20, 0.05, 0.20, 0, tint(LC('timber'),0.9), 5);   // gable, overhangs the bell
         pbox(M, p.x, py+1.86, p.z, 0.12, 0.15, 0.12, 0, LC('brass'), 1);              // mat-1 bell, 0.12 half-width
@@ -6984,12 +7121,53 @@ function buildRouteFence(){
   const hwAt = t => { const fi = t*F.N, i0 = Math.min(Math.floor(fi), F.N - 1), fr = fi - i0;
     return F.w[i0] + (F.w[Math.min(i0 + 1, F.N)] - F.w[i0])*fr; };
   const runs = []; let run = [];
-  const brk = () => { if(run.length > 1) runs.push(run); run = []; };
+  const brk = () => { if(run.length > 1) runs.push(run); run = []; };   /* §V10B B1b — pairs allowed: on the guard stretches a 2-post island IS the guard (the ≥3 floor opened the t≈0.165 escape) */
   const gY9 = (x, z) => Math.hypot(x - cx, z - cz) < 34
     ? cragFrozenAt(x, z, CC.capH, CC.skirtBase) : sampleHeight(x, z);   /* §36S-P item 2 — stilt bases read the equation split */
-  const post = (x, z) => { const rc = R.eval(x, z, cx, cz, CC.capH, CC.skirtBase, 0);
-    if(!rc || rc.cut < 0.5){ brk(); return; }
-    run.push({ x, z, tread: rc.tread, gb: Math.max(gY9(x, z) - 0.25, rc.tread - 1.4) }); };
+  /*  §V10B B1b — PLANTED-ONLY posts (the checkpoint-2 verdict: "posts
+      floating off the edge of cliff" — the V9S-P 0.2–23 m whitelisted stilt
+      hangs are RETIRED).  A post exists only where ground holds within
+      1.3 m of the tread.  Where the SHOULDER line (hw+0.15) has lost its
+      ground, the post steps INBOARD to the tread edge (hw−0.10 — seating
+      exact by construction, the V9S-D original line) — but only on WIDE
+      stretches (hw ≥ 0.78): on the hw-0.68 pinch the inboard line is the
+      corridor-killer the §36S-P item-2 move existed to fix, so there the
+      run breaks instead and the fence goes honestly open.  Strategic
+      sections emerge from seating; the rim3 columns feed gY9 so re-seating
+      is automatic on any reshape.                                          */
+   const postAt = (x, z) => { const rc = R.eval(x, z, cx, cz, CC.capH, CC.skirtBase, 0);
+     if(!rc || rc.cut < 0.5) return null;
+     const gY = gY9(x, z);
+     if(gY - 0.25 < rc.tread - 0.60) return null;        /* §V10B B1d — near-flush only (hang ≤0.35 m): "other fences still have floating posts" */
+     /*  §V10B item-1 fix (human-approved root cause).  The floaters were NOT
+         hanging stilts (fenceaudit: 0 clamped) — every post is centre-rooted.
+         The rim3 pilaster walls drop SHEER at the fence line, so the outboard
+         half of a post's ±0.12 m base disc is silhouetted against a 4–20 m
+         void (fencefloat.js: 20/46 posts) — THAT is the "floating" read.
+         Removing/stepping those posts was probed first and it opened hands-off
+         magnet ESCAPES at az 38–100° (the guard is load-bearing there; mag2 is
+         the gate).  So geometry stays B1-IDENTICAL (every post + solid kept →
+         mag2/corridors unchanged) and the void is founded VISUALLY: a lip post
+         (ring drop > 0.35 m) carries a small stone footing down to the ring-min
+         ground — it reads as a post set on a rock knob at the cliff edge, which
+         is exactly what a clifftop fence is.  Purely additive.               */
+     let ringMin = gY, ring2Min = gY;
+     for(let k9 = 0; k9 < 8; k9++){ const a9 = k9*Math.PI/4;
+       ringMin = Math.min(ringMin, gY9(x + Math.cos(a9)*0.12, z + Math.sin(a9)*0.12)); }
+     /*  rev2d (human: "put back the stones under the fence posts, to isolate
+         the 3 with issues").  rev2's rooted-rung preference silently removed
+         most founding stones: a post perched on the mesh ARRIS passes the
+         narrow ±0.12 ring yet reads floating.  A second, WIDER ring (±0.28,
+         12 bearings) decides the STONE alone — placement (foot) unchanged.  */
+     for(let k9 = 0; k9 < 12; k9++){ const a9 = k9*Math.PI/6;
+       ring2Min = Math.min(ring2Min, gY9(x + Math.cos(a9)*0.28, z + Math.sin(a9)*0.28)); }
+     const gb = Math.max(gY - 0.25, rc.tread - 1.4);
+     const foot = (gb - ringMin) > 0.35;                 // outboard disc over air → found it on stone
+     const stone = (gb - ring2Min) > 0.35;               // wide ring shows air → the post gets its stone back
+     const reach = (gb - ring2Min) <= 2.2;               // rev2f: the stone can actually touch that ground
+     return { x, z, tread: rc.tread, gb, foot, stone, reach, footG: Math.max(ring2Min, gb - 2.2) }; };
+  const post = (x, z) => { const p9 = postAt(x, z);
+    if(p9) run.push(p9); else brk(); };
   /*  (a) the winding, turn-left → terrace: outer shoulder line, the pad's
       az window (±(padL+0.6) m of arc, radially past the trench) is the GAP.
       The fence STARTS at t 0.035 (~2.5 m past the turn): at the junction the
@@ -7015,14 +7193,83 @@ function buildRouteFence(){
           (lat escaped to +5.7 where the review's math said rails pinch).
           THE ONE GAP stays the terrace outer rim (rF ≈ 17.2).              */
       if(Math.abs(daT)*R.padRC < R.padL + 0.6 && rF > 13.9 && Math.abs(rF - R.padRC) < R.padHW + 1.2){ brk(); continue; }
-      post(x, z);
+      /*  §V10B B1d — the line WANDERS deeper ("wander looks natural, can
+          wander more as needed to root posts"): a candidate LADDER from the
+          shoulder down to hw−0.40, deeper steps unlocked only where the
+          corridor stays wide (hw−0.10 at 0.74 ≈ the measured 1.26 m pinch;
+          −0.25 at 0.85; −0.40 at 1.00).  First rooted candidate wins; a
+          stretch nothing roots goes honestly open.                          */
+      /*  §V10B item-1 rev2 (human verdict: "some floaters persist — move the
+          fence closer to the path so the floaters land ON the path; it can
+          zigzag a little").  The hw corridor locks are WAIVED by that order:
+          the ladder now walks all the way to the tread centre-side (−0.55)
+          and PREFERS the first candidate whose whole base ring holds ground
+          (foot=false).  A lip post (+founding stone) is only the last
+          resort when no rung roots fully.                                   */
+      /*  §V10B rev2f (human: hollow/floating stones over the deep drops —
+          "just go back to fence zigzags enough to allow posts to be planted
+          correctly").  The ladder now prefers a SEATED rung (wide ±0.28 ring
+          holds ground — no stone needed at all), walking as deep as −0.85
+          but never closer than 0.30 m to the route centreline (corridor
+          floor).  2nd choice: a rooted rung whose stone REACHES real ground
+          (≤2.2 m).  Lip+stone stays the true last resort (guard solids keep
+          mag2's az 38–100 wall).                                            */
+      let p9 = null, root9 = null, lip9 = null;
+      const hw9 = hwAt(t);
+      for(const lo of [0.15, 0.02, -0.10, -0.25, -0.40, -0.55, -0.70, -0.85]){
+        if(hw9 + lo < 0.30) break;
+        const rI = R.rFit(t) + hw9 + lo;
+        const c9 = postAt(cx + Math.cos(az)*rI, cz + Math.sin(az)*rI);
+        if(!c9) continue;
+        if(!c9.stone){ p9 = c9; break; }
+        if(!root9 && !c9.foot && c9.reach) root9 = c9;
+        if(!lip9) lip9 = c9;
+      }
+      p9 = p9 || root9 || lip9;
+      /*  §V10B rev3 — MESH-ARRIS posts move INBOARD (human, twice now: "just
+          move the post closer to the path — some zigzag in the fence is ok,
+          looks natural"; this SUPERSEDES the rev3 stone attempt).  The ±0.28
+          EQUATION ring called these two seated, but a fine-LOD raycast against
+          the DRAWN mesh saw the rim3 triangulation cut 1.3–5 m under the
+          shoulder (az 133.8: base disc 1.3 m in the air; az 144.8: 2.7 m gone
+          at ±0.30 outboard) — instruments measure the equation, the human
+          sees the mesh.  Both re-seat 0.5/0.3 m inboard on raycast-SOLID
+          shoulder (base disc AND ±0.30 ring hold on the mesh — the /tmp/
+          inboard scan; corridor floor 0.30 m respected, walkroute gates it).
+          Keyed by the ladder's OWN landing position: an upstream re-phase
+          misses the key and simply leaves the ladder's choice standing.      */
+      for(const [mx9, mz9, ma9, mr9] of [[548.23, -247.73, 133.8, 16.5], [546.54, -250.51, 144.8, 16.3]])
+        if(p9 && Math.hypot(p9.x - mx9, p9.z - mz9) < 0.5){
+          const az9 = ma9*Math.PI/180;
+          const c9 = postAt(cx + Math.cos(az9)*mr9, cz + Math.sin(az9)*mr9);
+          if(c9) p9 = c9;
+        }
+      if(p9) run.push(p9); else brk();
     }
     brk(); }
   /*  (b) the stair trench, mouth → notch: resumes past the pad window,
       2.4 m stations on the ~51 % pitch, ends BEFORE the notch (cap free)   */
   { for(let w9 = R.finTurn - (R.padL + 0.6)/R.padRC; w9 > 0.05; w9 -= 0.165){
-      const az = R.ax + w9, rF = R.finR + R.halfW + 0.15;   /* §36S-P item 2 — trench line out with the winding's */
-      post(cx + Math.cos(az)*rF, cz + Math.sin(az)*rF);
+      const az = R.ax + w9;
+      /*  §V10B B1c — the trench line wanders inboard too when the shoulder
+          has lost its ground (same candidates as the winding; the trench
+          corridor is wide, no hw guard needed).                             */
+      /*  §V10B item-1 rev2 — the trench line prefers fully ring-rooted rungs
+          too (same waiver; lip+stone is the last resort).                   */
+      /*  §V10B rev2f — the trench line prefers SEATED rungs the same way
+          (deeper rungs, corridor floor, reachable-stone 2nd choice).       */
+      let p9 = null, root9 = null, lip9 = null;
+      for(const lo of [0.15, 0.02, -0.10, -0.25, -0.40, -0.55, -0.70]){
+        if(R.halfW + lo < 0.30) break;
+        const rF = R.finR + R.halfW + lo;
+        const c9 = postAt(cx + Math.cos(az)*rF, cz + Math.sin(az)*rF);
+        if(!c9) continue;
+        if(!c9.stone){ p9 = c9; break; }
+        if(!root9 && !c9.foot && c9.reach) root9 = c9;
+        if(!lip9) lip9 = c9;
+      }
+      p9 = p9 || root9 || lip9;
+      if(p9) run.push(p9); else brk();
     }
     brk(); }
   /*  (c) the terrace FAR-NOOK closure: a short back fence across the mouth
@@ -7030,6 +7277,22 @@ function buildRouteFence(){
   { for(const rr of [15.0, 16.05, 17.1])
       post(cx + Math.cos(R.ax + R.finTurn + 0.26)*rr, cz + Math.sin(R.ax + R.finTurn + 0.26)*rr);
     brk(); }
+  /*  §V10B rev2g (human: "large outcropping/ledge — fence should be open for
+      access").  The az −122°..−98° terrace (flat blobs y 109.5–112.2, r
+      19.5–24.5 — the blob scan) sits level with the tread: the fence OPENS
+      across it.  Cut by POST-FILTER, not an in-loop gap: an in-loop brk()
+      resets the 3.2 m spacing accumulator and RE-PHASES every post downstream
+      — two different re-phasings each parked a deep post dead on the magnet
+      walking line (magtrace wedges at az −20.8 / −73.2, full stop at cut 1).
+      Filtering after placement keeps every kept post byte-where rev2f put it
+      (the mag2-baseline layout); the >4.6 m span rule then opens the rails
+      and their guard solids across the hole on its own.                     */
+  for(const P of runs)
+    for(let i9 = P.length - 1; i9 >= 0; i9--){
+      const azP = Math.atan2(P[i9].z - cz, P[i9].x - cx);
+      const dP = Math.hypot(P[i9].x - cx, P[i9].z - cz);
+      if(azP > -2.130 && azP < -1.710 && dP > 20.5 && dP < 25.0) P.splice(i9, 1);
+    }
   let nP = 0;
   for(const P of runs){
     for(const p of P){
@@ -7039,16 +7302,142 @@ function buildRouteFence(){
           clamp (the balcony posts past t 0.82 — witnessed as stilts at the
           edge).  0.25 m burial guard where ground owns (no hairline floats). */
       pcyl(M, [p.x, p.gb, p.z], [p.x, p.tread + 1.02, p.z], 0.10, 0.09, 4, tw, 5, false, true);
+      /*  §V10B item-1 fix — the FOUNDING STONE: a lip post (outboard disc over
+          a rim3 void) gets a short tapered rock knob from the ring-min ground
+          up under the post base, so no post flank is silhouetted against air.
+          Additive decoration on the same painted draw; the guard geometry
+          above is untouched (mag2 stays B1-identical).                       */
+      if(p.stone)
+        pcyl(M, [p.x, p.footG, p.z], [p.x, p.gb + 0.14, p.z], 0.30, 0.12, 5, tint(LC('sD'), 0.86), 5, true, true);   /* rev2f: bottom-capped — the up-look saw a hollow shell */
       dreg('rf' + nP, p.x, (p.gb + p.tread + 1.02)/2, p.z, (p.tread + 1.02 - p.gb)/2); nP++;
     }
     for(let i = 1; i < P.length; i++){
       const a = P[i-1], b = P[i], len = Math.hypot(b.x - a.x, b.z - a.z);
       if(len > 4.6) continue;                     // a skipped post breaks the run
-      for(const ry of [0.56, 0.94])
+      /*  §V10B item-1 fix (human-approved): rails must not BRIDGE AIR — the
+          chord between two rooted posts crossed the notches between rim3
+          columns with 4–15 m of open air under it (fencefloat.js: 10/44
+          spans).  Where the ground falls > 0.5 m below the tread line the
+          LOWER rail is dropped (the mid-height line over big air was the
+          rope-bridge read); the TOP rail + its guard solid stay — probed:
+          removing both opened hands-off magnet escapes exactly at those
+          vertigo edges (mag2 cutMin 1.0 → 0).                              */
+      let dip9 = 0; const n9 = Math.max(2, Math.ceil(len/0.5));
+      for(let s9 = 1; s9 < n9; s9++){ const f9 = s9/n9;
+        dip9 = Math.max(dip9, a.tread + (b.tread - a.tread)*f9
+                       - gY9(a.x + (b.x - a.x)*f9, a.z + (b.z - a.z)*f9)); }
+      for(const ry of (dip9 > 0.5 ? [0.94] : [0.56, 0.94]))
         pcyl(M, [a.x, a.tread + ry, a.z], [b.x, b.tread + ry, b.z], 0.09, 0.09, 4, tw2, 5, false, false);
       pushSolid((a.x + b.x)/2, (a.z + b.z)/2, len/2 + 0.09, 0.09,
                 Math.atan2(b.z - a.z, b.x - a.x), Math.max(a.tread, b.tread) + 1.05);
     }
+  }
+  return finishPainted(M);
+}
+
+/*  §B3 (?pines = 1) — LEDGE PINES: a few small conifers on the crag's rock
+    shelves, softening and greening the wall.  Pure PB toolkit, ONE painted
+    draw, markers only (no SOLIDs — §W2-C6), deterministic (fixed hand-placed
+    anchors, no rng).  Runs AFTER the freeze so __CRAGCAP.capH and
+    cragFrozenAt are the live summit.  PLANTED-ONLY: every pine probes REAL
+    ground through the route fence's SPLIT probe (cragFrozenAt inside d<34 via
+    __CRAGCAP.capH/skirtBase, sampleHeight outside — the buildRouteFence gY9
+    idiom), roots its trunk flush at that height, and an 8-spoke ±0.15 m ring
+    guard SKIPS the pine when the ground under its base drops > 0.35 m below
+    the centre (no air-rooted trunks, no silhouetted stilts on a sheer rim3
+    lip).  OFF-TREAD: each candidate must clear the route corridor
+    (CRAG_ROUTE.eval cut ≤ 0.15 — the seat() idiom) and the summit cap
+    (r ≥ 16).  SEAT law: pines sit on the flattened CRAG_SHELVES bands, pure
+    dressing on top of the frozen field — they add no new flat ground and
+    move no prop, so the V7R4-C3 prop-drift table reads 0.00 excess and the
+    seat() audit is unchanged by construction.  SILHOUETTE law: every member
+    has half-width ≥ 0.09 m (trunk 0.11→0.09, foliage pbox half-widths
+    0.31–0.55) — no crag-range shimmer (the village 0.035-rail lesson).
+    Rides route2 (coerced off with it, like rim3); ?pines=0 restores the
+    batch default byte-identically.                                        */
+function buildCragPines(){
+  const M = PB();
+  const cx = CRAG_POS.x, cz = CRAG_POS.z;
+  const CC = window.__CRAGCAP;
+  const gY = (x, z) => Math.hypot(x - cx, z - cz) < 34
+    ? cragFrozenAt(x, z, CC.capH, CC.skirtBase) : sampleHeight(x, z);
+  /*  fixed ledge anchors (azDeg, radius, scale, yaw, colour-select).  Each
+      sits on one of the CRAG_SHELVES bands — the REAL flattened ledges the
+      freeze wrote — OUTBOARD of that shelf's prop seat (the shelf props own
+      the inner band via seat(); the pines hold the outer band), and clear of
+      the tread (the corridor guard below re-checks every one).            */
+  const SPOTS = [
+    /*  rev3 THE FAMILY (human, after approving the pair as "a natural family":
+        "need another adult, on the other side of seedling — a hint about
+        family for the flying fledgling that saw a pair of majestic birds at
+        the start of game" — the design-5.3 unspoken story, echoed in trees;
+        then, from the first family witness: "parents need to be wider apart,
+        almost a full parent width; seedling slightly in front").  Ground
+        truth: az >152.5 was rock under the OLD fat-skirt ruler, but the rev3
+        slimmer/lifted crown ruler (0.80s @ 0.30H) opens the pocket to
+        az 147.5–154.5 × r ~21–21.8 (pinespot5 scan).  The parents stand at
+        those corners — 2.39 m apart, ~1.0 m of AIR between crowns — with the
+        sapling centred between and 0.4 m FORWARD of their line.             */
+    [147.8, 21.4, 0.90, 0.30, 0],   // FATHER pine — low-az corner (wall −0.16/−0.23 neighbours, drop 0.05)
+    [151.0, 21.8, 0.55, 0.85, 1],   // SAPLING — centred, forward lip (wall −0.05, drop 0.19): the fledgling slightly in front of its parents
+    [154.2, 21.4, 0.82, 0.55, 4],   // MOTHER pine — high-az corner (wall −0.16/−0.11 neighbours, drop 0.07); fol[4] = the father's cMid hue ×1.08 — the pair matches with a subtle distinction (design 5.3's "subtle distinctive markings")
+    [-17.0, 20.5, 1.05, 0.40, 2],   // shelf az-−17 — outboard of the tail tread (r≈16.1), flat core 18.9→20.6
+    [187.0, 22.8, 1.02, 0.15, 3],   // rev2c — r 22.2 clipped the wall 0.27 m; 22.8 clears it (wall −0.16, drop 0.35 = the rooting limit, base still sinks 0.15)
+    [ 90.0, 22.0, 0.90, 0.55, 4],   // shelf az-90 outer — guard-decided (corridor/ring may skip)
+    [ 30.0, 20.8, 0.92, 0.70, 5],   // shelf az-30 — guard-decided (corridor guard likely skips)
+    [-110.0, 23.5, 0.45, 0.50, 6],  // rev2g SEEDLING — the az −122..−98 access ledge (fence opened there, human: "a seedling might be lovely"); outboard of the walk line so it never blocks the opening
+  ];
+  /*  rev2b witness: cShade/cDeep entries read near-BLACK against the sunlit
+      rock face — foliage picks from LIT greens only; tier ramp does depth. */
+  const fol = [LC('cMid'), LC('cLit'), tint(LC('cVarA'), 1.05), LC('cVarB'),
+               tint(LC('cMid'), 1.08), LC('cVarC'), tint(LC('cLit'), 0.94)];
+  let n = 0;
+  for(const [azDeg, r, s, yaw0, ci] of SPOTS){
+    const az = azDeg*Math.PI/180;
+    const x = cx + Math.cos(az)*r, z = cz + Math.sin(az)*r;
+    if(r < 16.0) continue;                       // off the summit cap / crown lip
+    const rc = CRAG_ROUTE.eval(x, z, cx, cz, CC.capH, CC.skirtBase, 0);
+    if(rc && rc.cut > 0.15) continue;            // on the corridor → skip (seat idiom)
+    const g = gY(x, z);
+    let ringMin = g;
+    for(let k = 0; k < 8; k++){ const a9 = k*Math.PI/4;
+      ringMin = Math.min(ringMin, gY(x + Math.cos(a9)*0.15, z + Math.sin(a9)*0.15)); }
+    if(g - ringMin > 0.35) continue;             // base over air → skip (PLANTED-ONLY)
+    const H = 2.6*s;
+    /*  rev2c WALL-CLEARANCE guard (human: cones must not cut into the cliff
+        behind or beside).  Sample ground on 12 bearings at the widest tier's
+        radius (and 1.3×): any sample ABOVE that tier's base = the rock wall
+        crosses the cone → skip.  Same gY math as /tmp/pinescan, so the SPOTS
+        above are chosen with exactly this ruler (margins −0.04/−0.05/−0.16). */
+    { const rT = 0.80*s, y0 = g + H*0.30; let wall = -99;   // rev3 ruler: slimmer skirt (0.80s), crown lifted to 0.30H
+      for(let j = 0; j < 12; j++){ const a9 = j*Math.PI/6;
+        for(const rr of [rT, rT*1.3])
+          wall = Math.max(wall, gY(x + Math.cos(a9)*rr, z + Math.sin(a9)*rr) - y0); }
+      if(wall > 0) continue; }
+    /*  §B3 rev2 (human: "pine trees look square! this isn't minecraft") — the
+        pbox tiers are gone: a pine is now a leaning trunk + THREE stacked
+        tapered CONES (7-gon pcyl skirts, bottom-capped so the up-look never
+        sees a hollow shell), tip kept ≥ 0.09 half-width (silhouette law).
+        Shade→lit tier colours read as foliage depth at range.
+        rev3 (human, from the family witness: "make them shrink a little and
+        make the trunk a little taller"): skirts slimmed 0.95→0.80·s per-tier
+        ladder 0.80/0.56/0.32, crown LIFTED 0.20H→0.30H with 0.30H tiers
+        (bare trunk now shows below the canopy — a mature pine, not a bush),
+        trunk top raised 0.60H→0.70H to fill the lifted crown.               */
+    pcyl(M, [x, g - 0.15, z], [x + 0.06*s, g + 0.70*H, z + 0.04*s], 0.11, 0.09, 5,
+         (ci & 1) ? tint(LC('trunkLit'), 1.02) : tint(LC('trunkShade'), 1.08), 5, false, false);
+    /*  rev2b (witness: mixed palette entries per tier read as navy/lime
+        STRIPES — a traffic cone, not a pine).  ONE foliage hue per tree;
+        tiers ramp dark→light of that SAME hue (bottom shaded, tip lit).   */
+    const base = fol[ci % 7];
+    const tierC = [ tint(base, 0.78), tint(base, 0.96), tint(base, 1.14) ];
+    for(let k9 = 0; k9 < 3; k9++){
+      const y0 = g + H*(0.30 + 0.21*k9), y1 = y0 + H*0.30;
+      const r0 = Math.max(0.80 - 0.24*k9, 0.28)*s, r1 = Math.max((0.30 - 0.09*k9)*s, 0.09);
+      pcyl(M, [x, y0, z], [x + 0.05*s*(k9+1)*0.4, y1, z + 0.03*s], r0, r1, 7, tierC[k9], 0, true, true);
+    }
+    dreg('pine' + n, x, g + 0.55*H, z, 0.62*H);
+    n++;
   }
   return finishPainted(M);
 }
@@ -7488,7 +7877,12 @@ function buildSummitShrine(){
       ? cragFrozenAt(x, z, RR9.capH, RR9.skirtBase) : sampleHeight(x, z);
     const seat = (bC, rA, rB) => {
       let best = null;
-      for(let rr = rA; rr <= rB + 2.0; rr += 0.25){
+      /*  §V10B B1b — under rim3 the scan stops at rB+0.5: the legacy rB+2.0
+          overshoot now wanders onto column crowns past the terrace (flat-spot
+          magnets — the az-30 flag walked out to d 23.7 and hung its cloths
+          over a column lip).  rim3=0 replays the V9S-P scan verbatim.       */
+      const rTop = State.rim3 ? rB + 0.5 : rB + 2.0;
+      for(let rr = rA; rr <= rTop; rr += 0.25){
         for(const db of [-6, -3, 0, 3, 6]){
           const bb = bC + db*Math.PI/180, x = cx + Math.cos(bb)*rr, z = cz + Math.sin(bb)*rr;
           if(RR9){ const rc9 = CRAG_ROUTE.eval(x, z, cx, cz, RR9.capH, RR9.skirtBase, 0);
@@ -7505,11 +7899,17 @@ function buildSummitShrine(){
     };
     const p = seat(b, sh[1], sh[2]);
     if(s === 0){                        // prayer-flag post
+      /*  §V10B B1c — REMOVED under rim3 (checkpoint-2b): "remove another
+          sign post on the side of the cliff, it is off the path and makes
+          no sense, player can't walk there" — the az-30 ledge flag post
+          was only ever reachable by eye.  rim3=0 rebuilds it verbatim.     */
+      if(!State.rim3){
       pcyl(M, [p.x, p.y, p.z], [p.x, p.y+3.0, p.z], 0.05, 0.04, 4, LC('timber'), 5, false, false);
       for(const f of [0,1,2,3]){
         const fb = b + (f - 1.5)*0.9, fx = p.x + Math.cos(fb)*0.35, fz = p.z + Math.sin(fb)*0.35;
         pbox(M, fx, p.y+2.72 - (f%2)*0.22, fz, 0.18, 0.12, 0.02, fb, cols[f], 0);
         dreg('shelf0f'+f, fx, p.y+2.72 - (f%2)*0.22, fz, 0.12);   // §34 V7R4-C3 audit export
+      }
       }
     } else if(s === 1){                 // windbell post
       pcyl(M, [p.x, p.y, p.z], [p.x, p.y+2.6, p.z], 0.045, 0.035, 4, LC('timber'), 5, false, false);
@@ -7518,13 +7918,23 @@ function buildSummitShrine(){
       dreg('shelf1g', p.x, p.y+2.08, p.z, 0.03);   // §34 V7R4-C3 audit export
       dreg('shelf1b', p.x, p.y+1.98, p.z, 0.09);
     } else if(s === 2){                 // nest tuft
+      /*  §V10B rev2e — REMOVED under pines (human: "why is there a black box
+          on the cliff pocket with the pair of pine trees, remove") — the
+          trunk-shade tuft read as a black box beside the pine pair.
+          ?pines=0 rebuilds it verbatim.                                    */
+      if(!State.pines){
       pbox(M, p.x, p.y+0.16, p.z, 0.26, 0.16, 0.24, 0.3, tint(LC('trunkShade'),1.0), 5);
       pbox(M, p.x+0.1, p.y+0.30, p.z+0.1, 0.05, 0.03, 0.05, 0.5, tint(LC('trunkLit'),0.9), 5);
       pbox(M, p.x-0.09, p.y+0.34, p.z-0.08, 0.05, 0.03, 0.05, 0.8, tint(LC('trunkLit'),0.9), 5);
       dreg('shelf2t0', p.x, p.y+0.16, p.z, 0.16);   // §34 V7R4-C3 audit export
       dreg('shelf2t1', p.x+0.1, p.y+0.30, p.z+0.1, 0.03);
       dreg('shelf2t2', p.x-0.09, p.y+0.34, p.z-0.08, 0.03);
+      }
     } else if(s === 3){                 // cairn: three stacked stones
+      /*  §V10B rev2e — REMOVED under pines (human: "why is there a cairn on
+          the cliff pocket with the solo pine tree, remove").  ?pines=0
+          rebuilds it verbatim.                                             */
+      if(!State.pines){
       let y = p.y;
       pbox(M, p.x, y+0.14, p.z, 0.16, 0.14, 0.15, 0.6, cols[s%4], 0);
       dreg('shelf3c0', p.x, y+0.14, p.z, 0.14);   // §34 V7R4-C3 audit export
@@ -7534,6 +7944,7 @@ function buildSummitShrine(){
       y += 0.11*1.7;
       pbox(M, p.x, y+0.08, p.z, 0.08, 0.08, 0.09, 0.9, cols[(s+2)%4], 0);
       dreg('shelf3c2', p.x, y+0.08, p.z, 0.08);   // §34 V7R4-C3 audit export
+      }
     }
     // s === 4 — EMPTY shelf: nothing placed ("discovered", not "decorated")
   }
@@ -8093,7 +8504,13 @@ void main(){
   // dissipate: thins and frays with age
   a *= vOp * (1.0 - smoothstep(0.45, 1.0, vAge));
   a *= mix(1.0, den, smoothstep(0.3,1.0,vAge));
-  if(!(a > 0.004)) discard;
+  /*  §M2a — near-camera fade: flying THROUGH a puff used to rasterize a
+      screen-filling stack of blended billboards (the train-smoke frame-rate
+      collapse on iPad, dpr 2).  Inside ~7 m the puff thins and the discard
+      below drops its fragments before the blend — the smoke "parts" around
+      the flyer instead of blinding both the eye and the GPU.               */
+  a *= smoothstep(1.6, 7.0, vDist);
+  if(!(a > 0.012)) discard;   // §M2a2 — raised floor: the faint rim band was fully shading per layer; <1.2% alpha is invisible and now free
 
   float zz=sqrt(max(0.0,1.0-min(r,1.0)*min(r,1.0)));
   vec3 N=normalize(vR*vC.x + vU*vC.y + vF*zz*0.9 + vec3(0.0,0.42,0.0));
@@ -8759,9 +9176,20 @@ class Walker {
         else if(s9.id === 1) hintOnce('rs1', 'the path turns left and up');
         else if(s9.id === 2) hintOnce('rs2', 'the valley grows small behind you');
         else if(s9.id === 3) hintOnce('rs3', 'rock leans over the walk ahead');
-        else if(s9.id === 4) hintOnce('rs4', 'a bell rings thin at the key turn');
+        else if(s9.id === 4){
+          /*  §V10B B1c — the human's sign-post line; rev2g: re-keyed rs4→rs4b under rim3 (the
+              PERSIST idiom had consumed 'rs4' with the OLD bell line in past sessions, so
+              'almost there' could never pop at the sign post).  rev3 (human: "it popped at the
+              sign, unfortunately it also popped on the way down"): the words only fit a CLIMBER
+              — a re-armed latch (fresh store/reload) let it speak to a descender.  Gate: pop
+              only while horizontal velocity carries TOWARD the next station up (s5) at
+              > 0.15 m/s; descending past the sign stays silent on any store state.            */
+          const s5 = this._rsSta.find(q9 => q9.id === 5);
+          if(s5){ const dx9 = s5.x - s9.x, dz9 = s5.z - s9.z, L9 = Math.hypot(dx9, dz9) || 1;
+            if((this.vel.x*dx9 + this.vel.z*dz9)/L9 > 0.15)
+              hintOnce(State.rim3 ? 'rs4b' : 'rs4', State.rim3 ? 'almost there' : 'a bell rings thin at the key turn'); } }
         else if(s9.id === 5) hintOnce('rs5', 'the prow slabs lie far below the rail');
-        else if(s9.id === 6 && hintSeen('rs1') && hintSeen('rs2') && hintSeen('rs3') && hintSeen('rs4') && hintSeen('rs5'))
+        else if(s9.id === 6 && hintSeen('rs1') && hintSeen('rs2') && hintSeen('rs3') && (hintSeen('rs4') || hintSeen('rs4b')) && hintSeen('rs5'))
           hintOnce('rs6', 'the ladder is walked — the gate stands open');
       }
     }
@@ -8902,7 +9330,7 @@ class Walker {
       this._spaceHold += dt;
       if(this._spaceHold >= 0.25){
         this._spaceHold = 0; this._takeoff();
-        if(typeof toast === 'function') toast('lift-off — look to steer');
+        if(typeof toast === 'function') toast(Input.hasTouch ? 'lift-off — tilt to steer' : 'lift-off — look to steer');
       }
     } else this._spaceHold = 0;
 
@@ -9075,6 +9503,7 @@ class Walker {
       if(fw > 0 || k['Space'] || k['KeyE']) this._landIntent = false;   // changed your mind
       this._cruise = this._landIntent ? TRIM*0.58
         : TRIM + (fw > 0 ? (k['ShiftLeft'] ? TRIM*0.75 : TRIM*0.5) : 0) - (fw < 0 ? TRIM*0.42 : 0);
+      if(State.dev && k['ShiftLeft'] && (k['Space']||k['KeyE'])) this._cruise = TRIM*2;   // §6.3 T9 dev power: SHIFT-flap = double speed (drag relaxes toward it — no velocity step)
       // F1c: with the altitude gradient on, the carry rides the wind at TRUE
       // height above the ground (the log profile blows harder up high) instead
       // of the fixed 12 m reference sample
@@ -9116,6 +9545,7 @@ class Walker {
         const sustain = flapKey ? 0.55 : 0.0;
         lift = 8.5*(sustain + (1.0-sustain)*ph);
         nose = 0.035*ph;
+        if(State.dev && flapKey && k['ShiftLeft']) lift *= 2.0;   // §6.3 T9 dev power: SHIFT-flap doubles the climb — envelope-scaled, still smooth
       }
       const diveKey = k['ControlLeft']||k['ControlRight']||k['KeyQ']||k['ShiftRight'];
       /*  PITCH IS THE WHOLE INSTRUMENT, hang-glider style.
@@ -9701,7 +10131,7 @@ class Walker {
             const azM = Math.exp(-( (da*Math.PI/180)*(da*Math.PI/180) )/(2*0.21*0.21));
             if(azM < 0.004 || !(dShelf > sh[1]-1 && dShelf < sh[2]+1)) continue;
             first('shelf');
-            if(s===0) hintOnce('shelf0', 'a prayer-flag post — someone keeps this ledge');
+            if(s===0){ if(!State.rim3) hintOnce('shelf0', 'a prayer-flag post — someone keeps this ledge'); }   /* §V10B B1c — the az-30 flag post is removed under rim3; no post, no line */
             else if(s===1) hintOnce('shelf1', 'a windbell post — the stone rings soft');
             else if(s===2) hintOnce('shelf2', 'a nest tuft — the swifts shelter here');
             else if(s===3) hintOnce('shelf3', 'a cairn — stone on stone, someone was here');
@@ -10228,7 +10658,7 @@ class Audio {
           LAW 2).  Pause-clean for free: the whole ctx suspends on pause
           (§V7R4-A1 suspendNow/resume machinery).  G6 vs the summit's E6 —
           sisters, not twins.                                                */
-      if(State.route2 && ROUTE_FIT && !walker.fly && gust > 0.55 && Math.random() < dt*0.8){
+      if(State.route2 && !State.rim3 && ROUTE_FIT && !walker.fly && gust > 0.55 && Math.random() < dt*0.8){   /* §V10B B1c — the S4 bell is REMOVED under rim3 (checkpoint-2b); no bell, no note.  rim3=0 restores both. */
         const dkt = Math.hypot(walker.pos.x - ROUTE_FIT.padX, walker.pos.z - ROUTE_FIT.padZ);
         if(dkt < 14) this.note(1567.98, 0.028, 2.4);
       }
@@ -10424,39 +10854,60 @@ const gpuT = (()=>{
   const NAMES = ['wind','cloud','shadow','refl','main','post'];
   const samples = {}; for(const n of NAMES) samples[n]=[];
   const pend = [];
-  let MAXQ = 0, qs = null, qi = 0, cur = null;
+  let MAXQ = 0, qs = null, qi = 0, cur = null, API = null;
   const enabled = ()=> on;
   function init(){
     if(!ext) return;
     on = (new URLSearchParams(location.search)).get('gputime')==='1';
-    // some drivers (notably headless Chromium) advertise the extension but
-    // leave the query methods unimplemented — fail soft rather than take the
-    // whole renderer down with a measurement-only knob
     if(!on) return;
-    if(typeof ext.createQueryEXT !== 'function' ||
-       typeof ext.beginQueryEXT !== 'function' ||
-       typeof ext.endQueryEXT   !== 'function'){ on = false; return; }
+    /*  §V10B B0a — the WebGL2 flavour of this extension carries ONLY the enums;
+        the query verbs live on the CONTEXT (createQuery/beginQuery/endQuery/
+        getQueryParameter).  The old check looked for the WebGL1 ext.*EXT verbs,
+        found none on a WebGL2 build, and silently disabled itself — the knob
+        never measured anything.  Bind whichever verb family exists; fail soft
+        only when BOTH are missing (headless stubs) — measurement-only knob,
+        never takes the renderer down.                                        */
+    const w2 = typeof gl.createQuery === 'function' && ext.TIME_ELAPSED_EXT !== undefined;
+    const w1 = typeof ext.createQueryEXT === 'function';
+    if(!w2 && !w1){ on = false; return; }
+    API = w2 ? {
+      create:  ()=> gl.createQuery(),
+      begin:   q => gl.beginQuery(ext.TIME_ELAPSED_EXT, q),
+      end:     ()=> gl.endQuery(ext.TIME_ELAPSED_EXT),
+      avail:   q => gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE),
+      result:  q => gl.getQueryParameter(q, gl.QUERY_RESULT),
+      disjoint:()=> gl.getParameter(ext.GPU_DISJOINT_EXT)
+    } : {
+      create:  ()=> ext.createQueryEXT(),
+      begin:   q => ext.beginQueryEXT(ext.TIME_ELAPSED_EXT, q),
+      end:     ()=> ext.endQueryEXT(ext.TIME_ELAPSED_EXT),
+      avail:   q => ext.getQueryObjectEXT(q, ext.QUERY_RESULT_AVAILABLE_EXT),
+      result:  q => ext.getQueryObjectEXT(q, ext.QUERY_RESULT_EXT),
+      disjoint:()=> gl.getParameter(ext.GPU_DISJOINT_EXT)
+    };
     MAXQ = 64; qs = [];
-    for(let i=0;i<MAXQ;i++) qs.push(ext.createQueryEXT());
+    for(let i=0;i<MAXQ;i++) qs.push(API.create());
   }
   function begin(name){
     if(!on || cur) return;             // never nest: query-overlap is undefined
     const q = qs[(qi = (qi+1) % MAXQ)];
-    ext.beginQueryEXT(ext.TIME_ELAPSED_EXT, q);
+    API.begin(q);
     cur = { q, name };
   }
   function end(){
     if(!on || !cur) return;
-    ext.endQueryEXT(ext.TIME_ELAPSED_EXT);
+    API.end();
     pend.push(cur); cur = null;
   }
   function poll(){
-    if(!on) return;
+    if(!on || !pend.length) return;
+    // the disjoint flag resets on read; when the driver lost the true clock,
+    // every open sample is suspect — drop the pending batch, keep the ring
+    if(API.disjoint()){ pend.length = 0; return; }
     for(let i=pend.length-1;i>=0;i--){
       const p = pend[i];
-      if(!ext.getQueryObjectEXT(p.q, ext.QUERY_RESULT_AVAILABLE)) continue;
-      const ns = ext.getQueryObjectEXT(p.q, ext.QUERY_RESULT_EXT);
-      if(!ext.getQueryObjectEXT(p.q, ext.GPU_DISJOINT)) samples[p.name].push(ns/1e6);
+      if(!API.avail(p.q)) continue;
+      samples[p.name].push(API.result(p.q)/1e6);
       if(samples[p.name].length > 240) samples[p.name].shift();
       pend.splice(i,1);
     }
@@ -10470,7 +10921,9 @@ const gpuT = (()=>{
     for(const n of NAMES) o[n] = med(n);
     return o;
   }
-  return { enabled, init, begin, end, poll, med, stats };
+  function counts(){ const o = {}; for(const n of NAMES) o[n] = samples[n].length; return o; }
+  function reset(){ for(const n of NAMES) samples[n].length = 0; }
+  return { enabled, init, begin, end, poll, med, stats, counts, reset };
 })();
 
 const scene  = new THREE.Scene();
@@ -10606,6 +11059,7 @@ const State = {
   sens:    qsNum('sens', 1),     // panel "Mouse feel": look sensitivity multiplier
   invertY: qsBool('invertY', false),
   dprCap:  qsNum('dpr', HAS_TOUCH ? 2 : 0),       // 0 = the panel's native ratio; §M1: touch devices default-cap at 2 (13" iPad M5 native IS 2 → ≈18.4M samples at q=2, inside MAX_SAMPLES; guards any 3× panel)
+  ipad:    qsBool('ipad', HAS_TOUCH),   // §B5 (B0b, ch 2.7) — the approved iPad M5 preset: HAS_TOUCH-gated msaa 2 · px 0.80 · shadow 2048 · grass gb ×0.7 · fpscap 60 (applied at the FID block below).  ?ipad=0 = the total escape (desktop config on glass); ?ipad=1 forces it on for a desktop A/B.
   treebin: qsBool('treebin', true),
   // defect fixes ride flags too, but default ON — ?bias=0 keeps the legacy
   // metre-scale shadow bias (and its 1..1500 light bracket) for A/B
@@ -10629,7 +11083,8 @@ const State = {
   norefl:  qsBool('norefl', false),    // diagnostic: suppress the reflection pass alone
   nowind:  qsBool('nowind', false),    // diagnostic: freeze the wind field after warmup
   noshadow:qsBool('noshadow', false),  // diagnostic: freeze the sun shadow map after warmup
-  nocloud: qsBool('nocloud', false),   // diagnostic: freeze the cloud shadow map after warmup
+  nocloud: qsBool('nocloud', false),  // diagnostic: freeze the cloud shadow map after warmup
+  dev:     qsBool('dev', false),      // §6.3 T9 dev powers (?dev=1): keys 1–5 park the camera at the CURRENT batch's checkpoint views (devJump, re-pointed per batch); SHIFT+flap = double speed (envelope/cruise scaled, never a velocity step).  BENCH-INERT: no suite URL passes dev.  V10B B6: flipped back to default-OFF for deploy (the rev2 review ran it TEMP default-ON; L-1: dev must not ship default-on — `?dev=1` remains the door).
    phase:   qsNum('phase', 4),          // 0 = legacy 3-cycle; 4 (default) = 5-frame interleave: wind twice (~24 Hz, smooth sway), shadow/cloud/reflection one phase each, never two heavy auxiliaries on one frame.  ?phase=0 restores the shared 3-cycle.
    reflfull:qsBool('reflfull', false),  // §P5: planar reflection at full buffer res instead of W>>1
    // session delight toggles (all default off)
@@ -10677,6 +11132,8 @@ const State = {
       strata2:   qsBool('strata2', true),    // §35 V8S — STRATA V2 differential erosion + the REAL 1.4 m walkable bench (greenlit reshape, 2026-08-25; the human ordered the batch, so it ships visible like the V7 family).  Gates: the freeze's strata/bench terms, the bench-v4 CRAG_PATH constant patch (below the State literal), the analytic cragmesh core, the walker's equation ground + 0.45 m slope-gate normal, the strata paint + teeth v4.  ?strata2=0 is the one-URL rollback and emits the pre-V8S field/mesh/shader BYTE-IDENTICALLY (v8shash-verified).
       route2:    qsBool('route2', true),     // §36S V9S — THE PILGRIM'S LADDER: CRAG_ROUTE (5 legs + 4 hairpin pads + the 1.5-lap promenade, torii-to-torii) supersedes the CRAG_PATH switchback; constructed cross-section (riser=max/shoulder=min — the V-ditch class is impossible), stations S0–S6, fence, desire path, knee outcrops.  ?route2=0 emits the deployed-V8S build BYTE-IDENTICALLY (v9shash); ?strata2=0 COERCES route2=0 (patch site below the State literal).
       magnet:    qsBool('magnet', true),     // §36S V9S — path magnetism: grounded && d<40 && cut≥0.5 && pure-forward ⇒ yaw eases toward the route tangent ≤25°/s; ANY mouse/A-D input overrides instantly (§3 invariant).  Rides route2 (coerced off with it); ?magnet=0 is the solo escape.
+      rim3:      qsBool('rim3', true),       // §V10B B1 — RIM3 silhouette relief: az-quantised pilaster columns (2–4 m proud, crisp box shoulders) on the outer wall + rim band — the knee-nose idiom scaled up, ONE block in cragFrozenAt (LAW 2).  Rides route2 (coerced off with it); ?rim3=0 restores the V9S-P default field byte-identically.
+     pines:     qsBool('pines', true),      // §B3 — LEDGE PINES: a few small conifers on the crag's rock shelves (pure dressing, ONE painted draw, markers only).  PLANTED-ONLY (route-fence split probe + ring-min hang guard); SILHOUETTE law: every member ≥ 0.09 m half-width.  Rides route2 (coerced off with it, like rim3); ?pines=0 restores the batch default byte-identically.
     swifts:    qsBool('swifts', true),      // §29.4 C — life on the face: 3 nest stations (CRAG_NESTS) + 6 homed swifts + wall whitewash + the brush dust wisp.  §31.V7 DEFAULT-ON 2026-08-24 by the human's order; ?swifts=0 rollback (the off shader stays byte-identical)
     perch:     qsBool('perch', true),      // W2-C3 treetop/ridge perch (slow crown-top touch = sit, not spin)
      trainride: qsBool('trainride', true),  // W2-B6 land on and ride the train roof
@@ -10743,6 +11200,8 @@ if(State.strata2) Object.assign(CRAG_PATH, { rampR0:27.5, rampDr:2.0, dMax:30.5,
     CRAG_NESTS is a module const, so the ONE patch site is here too.        */
 if(!State.strata2) State.route2 = false;
 if(!State.route2) State.magnet = false;
+if(!State.route2) State.rim3 = false;   // §V10B B1 — rim3 rides route2: both existing rungs replay byte-identically
+if(!State.route2) State.pines = false;   // §B3 — pines ride route2: the escape ladder stays total (?pines=0 is the solo rollback)
 if(State.route2) CRAG_NESTS[2].hFrac = 0.741;
 /*  §T10 — param cruise knob.  Default flipped 12 → 10 (accepted 2026-08-15):
     ~30% tighter turn radius makes 12 m thermal cores circle-able, 36 km/h
@@ -10805,6 +11264,24 @@ if(QS.has('bloomlv')) FID.bloomLv= Math.max(1,   +QS.get('bloomlv')|0);
     the floor (C1), so ?qpx=0.85 and __Q[2].px=0.85 land on the same config.     */
 if(QS.has('qpx')) FID.px = Math.max(0.20, +QS.get('qpx'));
 for(const preset of QUALITY) Object.assign(preset, FID);
+/*  §B5 — the approved iPad M5 preset (ch 2.7 / B0b).  On touch (or a forced
+    ?ipad=1) pin the fanless-safe config into the touch default preset (q2):
+    msaa 2, px 0.80, shadow 2048, grass gb ×0.7, fpscap 60.  Applied HERE on
+    the one FID code path (before boot reads QUALITY), so there is no per-use
+    override.  Each knob yields to an explicit query (?msaa/?px/?qpx/?shadowq/
+    ?gb/?fpscap), and ?ipad=0 is the total escape.  Paid facts (B0a/ch 2.4):
+    the levers are grass, msaa, px — NEVER shadowq/bloom/fences; Safari iPadOS
+    is 60-locked; 0.80× render at reading distance is at the eye's resolving
+    limit (native pixels are soup money); msaa must pin 2 (msaa4-grant drops
+    beats even on the Mac).                                                   */
+if(State.ipad){
+  const ip = QUALITY[2];
+  if(!QS.has('msaa'))                  ip.msaa   = Math.min(ip.msaa || 2, 2);
+  if(!QS.has('px') && !QS.has('qpx'))  ip.px     = 0.80;
+  if(!QS.has('shadowq'))               ip.shadow = 2048;
+  if(!QS.has('gb'))                    State.gb  = [0.7, 0.7, 0.7, 0.7];
+  if(!QS.has('fpscap'))                State.fpscap = 60;
+}
 if(QS.has('shadowspan')) CFG.shadowSpan = Math.max(60, +QS.get('shadowspan'));
 // the total-sample budget is itself a sweep axis: it is what forces px down when
 // MSAA is on, so raising it is the difference between "MSAA instead of
@@ -11561,9 +12038,20 @@ async function boot(){
     if(State.route2 && window.__CRAGCAP && ROUTE_FIT){
       routeFence = new THREE.Mesh(buildRouteFence(), paintedMat);
       routeFence.frustumCulled = true; routeFence.renderOrder = 2;
-      routeFence.userData.depth = vMesh.userData.depth;
-      scene.add(routeFence);
-    }
+       routeFence.userData.depth = vMesh.userData.depth;
+       scene.add(routeFence);
+     }
+     /*  §B3 — the ledge pines: a few small conifers on the crag's rock shelves
+         (pure dressing, markers only, no SOLIDs).  ONE painted draw, built
+         AFTER the freeze so __CRAGCAP.capH + cragFrozenAt are live.  Every
+         pine probes real ground and skips unless it roots flush off the tread;
+         rides route2 (coerced off with it); ?pines=0 is the one-URL rollback. */
+     if(State.pines && window.__CRAGCAP && ROUTE_FIT){
+       const pines = new THREE.Mesh(buildCragPines(), paintedMat);
+       pines.frustumCulled = true; pines.renderOrder = 2;
+       pines.userData.depth = vMesh.userData.depth;
+       scene.add(pines);
+     }
     // §29.5-D1 — the summit reward (?cragrocky=1): the shrine + sakura + shelf
     // props, ONE painted draw, built AFTER the freeze (__CRAGCAP.capH + the
     // sheltered shelf heights are live).  The dressing's plain top marker is
@@ -11643,11 +12131,17 @@ async function boot(){
   initMotes(); initBirds();
 
   train.onChuff = (wp, fwd, spd)=>{
-    for(let i=0;i<2;i++){
+    /*  §M2a2 — the plume on GLASS: half the puffs, ~40% shorter life.  The
+        60 m growth clamp below is the other half of the iPad train-smoke
+        collapse (dozens of screen-covering blended layers at dpr 2 → 80 ms
+        GPU frames → the main thread stalls on submit and even AUDIO chokes).
+        Desktop spawns are untouched.                                        */
+    const nP = HAS_TOUCH ? 1 : 2, lifeB = HAS_TOUCH ? 10 : 16, lifeR = HAS_TOUCH ? 6 : 9;
+    for(let i=0;i<nP;i++){
       smoke.spawn({ x:wp.x+(Math.random()-0.5)*0.25, y:wp.y+0.1, z:wp.z+(Math.random()-0.5)*0.25,
         vx:fwd.x*spd*0.55+(Math.random()-0.5)*0.9, vy:5.4+Math.random()*2.6,
         vz:fwd.z*spd*0.55+(Math.random()-0.5)*0.9,
-        life:16+Math.random()*9, size:0.85+Math.random()*0.5, seed:Math.random()*100,
+        life:lifeB+Math.random()*lifeR, size:0.85+Math.random()*0.5, seed:Math.random()*100,
         kind:0, op:0.92 });
     }
     const d = camera.position.distanceTo(wp);
@@ -11716,6 +12210,16 @@ async function boot(){
   // covers the shutdown edge.  Registered AFTER buildTargets so the repaint
   // lands on the resized canvas.
   window.addEventListener('resize', ()=>{ if(State.paused && State.running) window.__renderOnce(); });
+  /*  §M1d — iPadOS rotation/status-bar quirks: at the window resize event the
+      inner dims can still be the PRE-rotate box, and some inset transitions
+      fire only the visualViewport resize.  Re-sync through both, plus one
+      settle pass after rotation; each ends with the paused-repaint contract
+      above.  Desktop: visualViewport mirrors window resize (harmless double
+      build on drags), orientationchange never fires.                        */
+  const vpResync = ()=>{ buildTargets(); if(State.paused && State.running) window.__renderOnce(); };
+  if(window.visualViewport)
+    window.visualViewport.addEventListener('resize', vpResync);
+  window.addEventListener('orientationchange', ()=> setTimeout(vpResync, 400));
   bindInput();
   setStat('ready', 1.0);
   $('#enter').classList.add('on');
@@ -11742,6 +12246,12 @@ async function boot(){
   // the water surface, so a driver can switch the planar reflection OFF live
   // (uReflectOn=0) to A/B its visual contribution against its per-pass cost
   window.__WATER = waterMesh;
+  // §V10B B0a — the GPU-audit row (diagnostic-only, the __AUDIO one-line
+  // precedent): per-pass timers, the renderer (info.calls/tris), the scene
+  // graph, the resolve numbers, and a fence getter so the audit can hide ONE
+  // merged painted draw and price it.
+  window.__GPUT = gpuT; window.__R = renderer; window.__SCENE = scene;
+  window.__PX = PX_DBG; window.__FENCE = ()=> routeFence;
   // §W6 — the dressing-site witnesses (plan-mandated one-time clearances; same
   // class as the __W/__U/__S driver row above)
   window.__SITE = { VILLAGE, SHRINE_POS, INN_OBB, INN_HEARTH, SOLIDS, riverField, riverWidth, waterLevel, TRACK:()=>TRACK };
@@ -11816,14 +12326,24 @@ function dbgMirror(){
     gput: g, drawnPerRing: grass && grass.drawnPerRing ? grass.drawnPerRing : null,
     coverage: grass && grass.coverage ? grass.coverage : null });
 }
+/*  §M1d — the viewport truth.  iPadOS web apps can report a SHRUNKEN
+    innerWidth/Height (status-bar / rotation staleness) while visualViewport
+    carries the real cover-extended box — the difference letterboxes the
+    canvas.  One pair of getters owns every sizing consumer; on desktop both
+    sources agree, so these are identity there.  max() so a pinch-zoomed or
+    keyboard-shrunk visual box can never UNDERSIZE the canvas.               */
+const VP_W = ()=> Math.max(window.innerWidth||0,
+  window.visualViewport ? Math.round(window.visualViewport.width)  : 0);
+const VP_H = ()=> Math.max(window.innerHeight||0,
+  window.visualViewport ? Math.round(window.visualViewport.height) : 0);
 function buildTargets(){
   const q = QUALITY[State.q];
   // native device ratio is the DEFAULT; the old 1.5 cap rendered at 75% of the
   // panel and let the compositor upscale — a defect, not a tuning choice
   const dpr = State.dprCap > 0 ? State.dprCap : (window.devicePixelRatio||1);
   renderer.setPixelRatio(dpr);
-  renderer.setSize(window.innerWidth, window.innerHeight, true);
-  camera.aspect = window.innerWidth/window.innerHeight;
+  renderer.setSize(VP_W(), VP_H(), true);
+  camera.aspect = VP_W()/VP_H();
   camera.updateProjectionMatrix();
   reflCam.aspect = camera.aspect; reflCam.fov = camera.fov; reflCam.updateProjectionMatrix();
 
@@ -11844,7 +12364,7 @@ function buildTargets(){
       quality, so px may dip under dpr: that is precisely the config the AA A/B
       wants to measure.                                                        */
   {
-    const tot = p => (window.innerWidth*p)*(window.innerHeight*p)*Math.max(samples,1);
+    const tot = p => (VP_W()*p)*(VP_H()*p)*Math.max(samples,1);
     /*  §31.V7R5-b — the PRESET path sheds its extra samples before touching
         px: a display too large for msaa4 at this px falls back to the exact
         pre-V7R5b config (px unchanged, msaa 2) instead of a blurrier px with
@@ -11857,8 +12377,8 @@ function buildTargets(){
       if(samples > 2 && tot(px) > MAX_SAMPLES) samples = 2;
     }
   }
-  const W = Math.max(320, Math.floor(window.innerWidth*px));
-  const H = Math.max(240, Math.floor(window.innerHeight*px));
+  const W = Math.max(320, Math.floor(VP_W()*px));
+  const H = Math.max(240, Math.floor(VP_H()*px));
   PX_DBG.dpr=dpr; PX_DBG.px=px; PX_DBG.W=W; PX_DBG.H=H;
 
   // the angular size of one rendered pixel — the floor for grass blade width
@@ -12057,6 +12577,24 @@ function initBirds(){
   // (the §17 rng-stream law).  Each swift carries a `home` station index and a
   // flush timer (_fl); both consumed in updateBirds.
   if(State.swifts){
+    /*  §V10B rev2g (human: "birds perched or nesting in mid air" near the
+        upper fence).  CRAG_NESTS.r is the static CRAG_SHAPE.wallR (19.5) but
+        the V8S/V9S/rim3 reshapes moved the real face: at nest height the wall
+        now stands at r 17.5 (az 85) / 16.75 (az 139) — the perch hung 2–2.75 m
+        off the rock.  Re-seat each station ON the current face: the outermost
+        r whose frozen ground reaches nest height.  route2-gated (?route2=0
+        replays the shipped stations verbatim); no rng consumed.             */
+    if(State.route2 && window.__CRAGCAP){
+      const CC9 = window.__CRAGCAP;
+      for(const st9 of CRAG_NESTS){
+        const sy9 = cragStationY(st9.hFrac);
+        for(let r9 = 33; r9 >= 10; r9 -= 0.25){
+          const g9 = cragFrozenAt(CRAG_POS.x + Math.cos(st9.az)*r9,
+                                  CRAG_POS.z + Math.sin(st9.az)*r9, CC9.capH, CC9.skirtBase);
+          if(g9 >= sy9){ st9.r = r9; break; }
+        }
+      }
+    }
     const r2 = rng(2931);
     for(let i=0;i<6;i++){
       const st = CRAG_NESTS[i%3];
@@ -12344,7 +12882,7 @@ function updateSmoke(dt){
     d.x += d.vx*dt; d.y += d.vy*dt; d.z += d.vz*dt;
     _hallB2(d);            // V7R2-B2: summit wisps/puffs deflect out of the hall (smoke)
     d.size += dt*(d.kind===1 ? 0.55 : 1.55)*(1.0 - u*0.5);
-    d.size = clamp(d.size, 0.05, 60);
+    d.size = clamp(d.size, 0.05, HAS_TOUCH ? 14 : 60);   // §M2a2 — glass caps the balloon: a 60 m puff at dpr 2 is a full-screen blend layer, and a plume stacks dozens
     d.op = (d.kind===1?0.55:0.95) * (1 - u*0.15) * d.opMul;   // opMul: §W5-E8 faint wisps (1 = stock)
     if(!isFinite(d.x+d.y+d.z+d.size)) smoke.kill(d);
   }
@@ -12903,12 +13441,12 @@ function postChain(){
   if(State.showWind){
     windViewMat.uniforms.uWindTex.value = windRT.texture;
     windViewMat.uniforms.uMean.value = WindSys.meanSpeed;
-    const s = Math.floor(Math.min(window.innerWidth, window.innerHeight)*0.30);
+    const s = Math.floor(Math.min(VP_W(), VP_H())*0.30);
     renderer.setRenderTarget(null);
     renderer.setViewport(12, 12, s, s); renderer.setScissor(12,12,s,s); renderer.setScissorTest(true);
     quadMesh.material = windViewMat; renderer.render(quadScene, quadCam);
     renderer.setScissorTest(false);
-    renderer.setViewport(0,0,window.innerWidth,window.innerHeight);
+    renderer.setViewport(0,0,VP_W(),VP_H());
   }
 }
 
@@ -13303,14 +13841,16 @@ function sortClouds(){
   cloudObj.geom.index.needsUpdate=true;
   cloudObj.geom.setDrawRange(0, k);
 }
-function setQuality(q){
+function setQuality(q, quiet){
   q = clamp(q|0, 0, 3);
   if(q === State.q) return;
   State.q = q; State.autoQ = false;
   for(const b of document.querySelectorAll('#qPreset button'))
     b.classList.toggle('on', +b.dataset.q === q);
   rebuildGrass(); buildTargets();
-  toast(['low','medium','high','ultra'][q]);
+  // §M2b — the governor passes quiet: an automatic downshift is plumbing, and
+  // testers read "low" as a verdict on themselves.  Chosen changes still speak.
+  if(!quiet) toast(['low','medium','high','ultra'][q]);
 }
 function rebuildGrass(){
   grass.build(QUALITY[State.q]);
@@ -13332,7 +13872,7 @@ function autoQuality(){
     _aq.lo = 0; _aq.upT = 0; _aq.fade = null;   // a fade in flight is cancelled too
     // §T17: a down-step confesses the governor's raise was wrong — take it back first
     if(_aq.upQ >= 0){ QUALITY[_aq.upQ].px = _aq.upPx; _aq.upQ = -1; }
-    setQuality(State.q - 1); State.autoQ = true;
+    setQuality(State.q - 1, true); State.autoQ = true;
     return;
   }
   /*  §T17 — up-steps, REWORKED (the old ~50 s whole-preset q+1 jump — the
@@ -13589,7 +14129,7 @@ const Input = {
       bench suite are bit-identical).  dead/full in degrees, expo the response
       curve, turn the max on-foot yaw rate in °/s, deep the wing-verb gate in
       degrees, lp the low-pass corner in Hz.                                  */
-  tune: Object.assign({ dead: 4, full: 20, expo: 1.5, turn: 80, deep: 25, lp: 10 },
+  tune: Object.assign({ dead: 4, full: 20, expo: 1.5, turn: 80, deep: 25, lp: 10, look: 1.6 },
     window.__TILT_TUNE || {}),
 };
 window.__INPUT = Input;    // harness witness (tilt_map.js probes the mapping)
@@ -13693,13 +14233,50 @@ function bindInput(){
       walker._landIntent = true; toast('coming down — spread and settle');
     } else {
       walker._takeoff();          // A1: same eased rise as hold-Space
-      toast(Input.hasTouch ? 'flight — hold to flap, drag to steer'
+      toast(Input.hasTouch ? 'flight — right thumb flaps, tilt to steer'
                            : 'flight — hold space to flap, look to steer');
     }
   };
+  /*  §6.3 T9 — DEV POWERS (?dev=1 only; BENCH-INERT — no suite URL passes dev).
+      Keys 1–5 park the camera at the CURRENT batch's five checkpoint views; the
+      list below is V10B's and is RE-POINTED each batch (same data class as the
+      orbitshot presets).  Park idiom = the ab2 harness idiom: fly + freeY +
+      zeroed vel; yaw by the atan2(−dx,−dz) heading idiom; negative pitch looks
+      down.  A park is a dev teleport, not gameplay — the camera laws govern
+      MOTION, and normal play never reaches this code.                        */
+  /*  §6.3 T9 — dev views, the human's ladder (2026-08-29): SHIFT+1..5 =
+      far / medium / close / top / high-top of the crag, approached from the
+      route-mouth (postcard) side so every rung frames the batch's work.
+      Plain 1–4 stay the quality presets.                                   */
+  const devJump = (i)=>{
+    const cc = window.__CRAGCAP; if(!State.dev || !cc) return;
+    const st = window.__RSTA ? window.__RSTA() : [];
+    const s0 = st.find(s=>s.id===0);
+    const C  = { x: CRAG_POS.x, z: CRAG_POS.z };
+    const az = s0 ? Math.atan2(s0.z-C.z, s0.x-C.x) : Math.PI*0.86;   // the postcard face
+    const at = (r, ey, ty, nm)=>({ ex:C.x+Math.cos(az)*r, ez:C.z+Math.sin(az)*r, ey,
+                                   tx:C.x, tz:C.z, ty, nm });
+    const v = [
+      at(420, 135,        cc.capH*0.55, 'far'),
+      at(180, 125,        cc.capH*0.60, 'medium'),
+      at( 60, cc.capH*0.78, cc.capH*0.70, 'close'),
+      at( 30, cc.capH+45, cc.capH,      'top view'),
+      at( 12, cc.capH+130, cc.capH,     'high top view'),
+    ][i];
+    if(!v) return;
+    const W = walker;
+    W.cinematic=false; W._ride=null; W._perch=null; W._landIntent=false;
+    W.fly=true; W.flyY=0; W.pos.x=v.ex; W.pos.z=v.ez;
+    W.freeY=v.ey; W.groundY=v.ey-CFG.eyeHeight;
+    W.yaw   = Math.atan2(-(v.tx-v.ex), -(v.tz-v.ez));
+    W.pitch = Math.atan2(v.ty-v.ey, Math.hypot(v.tx-v.ex, v.tz-v.ez));
+    W.vel.set(0,0,0);
+    toast('dev view '+(i+1)+' — '+v.nm);
+  };
   addEventListener('keydown', e=>{
     walker.keys[e.code]=true;
-    if(e.code>='Digit1' && e.code<='Digit4'){ setQuality(+e.code.slice(5)-1); saveSettings(); }
+    if(State.dev && e.shiftKey && e.code>='Digit1' && e.code<='Digit5'){ devJump(+e.code.slice(5)-1); }
+    else if(e.code>='Digit1' && e.code<='Digit4'){ setQuality(+e.code.slice(5)-1); saveSettings(); }
     if(e.code==='KeyH') togglePanel();
     if(e.code==='KeyC'){ walker.cinematic=!walker.cinematic; walker.cineT=0;
       toast(walker.cinematic?'cinematic':'free walk'); }
@@ -13767,25 +14344,37 @@ function bindInput(){
   /*── §M1 — touch input (iPad).  Gated on touch detect so a headless bench
       session (no touch, fine pointer) attaches NONE of this: zero listeners,
       zero timers, byte-identical desktop behavior.  The gesture contract
-      (plan table):
-        · one-finger DRAG   = look — walker.look(), the mouse steering path;
-          slop-based: >12 px of travel makes the touch a look drag FOREVER
-          (it can never flap);
-        · stationary ≥120 ms = Space held (walker.keys — the key path the
-          suites drive): on foot that is the existing 0.25 s hold-to-takeoff,
-          airborne it is the sustained flap; released on lift;
-        · TAP (<280 ms, <12 px) = a 90 ms Space pulse: one flap beat in the
-          air, and on foot _spaceHold never reaches 0.25 s — a tap does
-          nothing there, exactly the keyboard's contract;
-        · a SECOND simultaneous finger may hold-flap while the first drags;
-        · TWO-FINGER DOUBLE-TAP = recapture the tilt neutral;
+      (§M1c two-thumb landscape grip — the left/right SPLIT is at innerWidth/2):
+        · RIGHT half, one-finger DRAG = look — walker.look(), the mouse
+          steering path; slop-based: >12 px of travel makes the touch a look
+          drag FOREVER (it can never flap);
+        · RIGHT half, stationary ≥120 ms = Space held (walker.keys — the key
+          path the suites drive): on foot that is the existing 0.25 s
+          hold-to-takeoff, airborne it is the sustained flap; released on lift;
+        · RIGHT half TAP (<280 ms, <12 px) = a 90 ms Space pulse: one flap
+          beat in the air, and on foot _spaceHold never reaches 0.25 s — a
+          tap does nothing there, exactly the keyboard's contract;
+        · LEFT half, stationary ≥120 ms = KeyW held (the same key path): WALK
+          FORWARD on foot — the fore/aft tilt no longer has to carry the walk,
+          the iPad rests level — and in flight the W tuck (a higher cruise);
+          released on lift.  A left touch is NEVER a look drag: a resting or
+          wobbling grip thumb must not yank the camera;
+        · LEFT half TAP = the F verb (toggleFly): take off on foot, the
+          landing intent in the air — the mode verb lives under the thumb;
+        · a SECOND simultaneous RIGHT finger may hold-flap while the first
+          drags (index drags, thumb flaps);
+        · TWO-FINGER DOUBLE-TAP = recapture the tilt neutral (either half);
         · tapping the view with the settings open just closes them (no Esc
           on glass).                                                        */
   if(Input.hasTouch){
-    const SLOP = 12, HOLD_MS = 120, TAP_MS = 280, LOOKK = 2.5;
+    /*  §B5 — hide the 120 fps button on glass: Safari iPadOS rAF is 60-locked
+        by default, so 120 is a lie on touch (the preset pins fpscap 60).     */
+    { const b120 = $('#fps120'); if(b120) b120.style.display = 'none'; }
+    const SLOP = 12, HOLD_MS = 120, TAP_MS = 280, LOOKK = Input.tune.look;   // §M1f — drag-look gain is a tune knob (testers found 2.5 twitchy for a gentle game)
     const tst = new Map();          // touch id -> gesture record
     let lookId = null, maxT = 0, twoT0 = 0, twoPrev = 0, twoOk = false;
     const endSpace = rec=>{ if(rec.spc){ walker.keys['Space'] = false; rec.spc = false; } };
+    const endWalk  = rec=>{ if(rec.wk ){ walker.keys['KeyW']  = false; rec.wk  = false; } };
     cv.addEventListener('touchstart', e=>{
       e.preventDefault();           // owns the canvas: no scroll/zoom/callout, ever
       audio.resume();
@@ -13794,10 +14383,12 @@ function bindInput(){
       maxT = Math.max(maxT, e.touches.length);
       for(const t of e.changedTouches){
         const rec = { x0:t.clientX, y0:t.clientY, lx:t.clientX, ly:t.clientY,
-          t0:performance.now(), moved:false, spc:false, hold:0 };
+          t0:performance.now(), moved:false, spc:false, wk:false, hold:0,
+          left: t.clientX < innerWidth/2 };   // §M1c — the thumb zone, judged at touch-down
         rec.hold = setTimeout(()=>{
           if(rec.moved || lookId !== null && lookId === rec.id) return;
-          rec.spc = true; walker.keys['Space'] = true;   // the flap/takeoff key, held
+          if(rec.left){ rec.wk = true; walker.keys['KeyW'] = true; }   // §M1c — left thumb: go (walk / tuck)
+          else { rec.spc = true; walker.keys['Space'] = true; }        // right thumb: the flap/takeoff key, held
         }, HOLD_MS);
         rec.id = t.identifier;
         tst.set(t.identifier, rec);
@@ -13809,9 +14400,10 @@ function bindInput(){
         const rec = tst.get(t.identifier); if(!rec) continue;
         if(!rec.moved && Math.hypot(t.clientX - rec.x0, t.clientY - rec.y0) > SLOP){
           rec.moved = true; twoOk = false;
-          // >12 px before the hold fired = a look drag (one slot); a hold that
-          // already flapped keeps flapping — the second-finger contract
-          if(!rec.spc && lookId === null){ lookId = rec.id; rec.lx = t.clientX; rec.ly = t.clientY; }
+          // >12 px before the hold fired = a look drag (one slot) — RIGHT half
+          // only (§M1c: a wandering grip thumb on the left is inert); a hold
+          // that already flapped keeps flapping — the second-finger contract
+          if(!rec.spc && !rec.wk && !rec.left && lookId === null){ lookId = rec.id; rec.lx = t.clientX; rec.ly = t.clientY; }
         }
         if(lookId === rec.id){
           walker.look((t.clientX - rec.lx)*LOOKK, (t.clientY - rec.ly)*LOOKK);
@@ -13825,14 +14417,22 @@ function bindInput(){
       for(const t of e.changedTouches){
         const rec = tst.get(t.identifier); if(!rec) continue;
         clearTimeout(rec.hold);
+        const flapped = rec.spc;          // a fired right-hold consumes its tap
         if(rec.spc) endSpace(rec);
-        else if(!cancelled && !rec.moved && lookId !== rec.id && now - rec.t0 < TAP_MS && maxT < 2){
-          // a sub-120 ms SINGLE-finger tap: pulse the key across a few frames —
-          // exactly one wingbeat airborne, provably nothing on foot (0.09 s <
-          // 0.25 s hold).  Multi-finger taps never pulse: the two-finger
-          // double-tap below must recalibrate without a stray flap beat.
-          walker.keys['Space'] = true;
-          setTimeout(()=>{ walker.keys['Space'] = false; }, 90);
+        if(rec.wk)  endWalk(rec);         // a left tap may have walked ~160 ms — harmless, and the toggle below still runs
+        if(!cancelled && !rec.moved && lookId !== rec.id && now - rec.t0 < TAP_MS && maxT < 2){
+          if(rec.left){
+            // §M1c — the left tap IS the F verb: take off on foot, land in the
+            // air (toggleFly's landing INTENT — spread, settle, flare).
+            toggleFly();
+          } else if(!flapped){
+            // a sub-120 ms SINGLE-finger tap: pulse the key across a few frames —
+            // exactly one wingbeat airborne, provably nothing on foot (0.09 s <
+            // 0.25 s hold).  Multi-finger taps never pulse: the two-finger
+            // double-tap below must recalibrate without a stray flap beat.
+            walker.keys['Space'] = true;
+            setTimeout(()=>{ walker.keys['Space'] = false; }, 90);
+          }
         }
         if(lookId === rec.id) lookId = null;
         tst.delete(t.identifier);
@@ -13850,10 +14450,11 @@ function bindInput(){
 
     /*── the touch furniture: hint strings, buttons, fade ──*/
     $('#keys').innerHTML =
-      '<span id="keysWalk"><span><b>tilt</b> walk &amp; turn</span><span><b>drag</b> look</span>'
-      + '<span><b>hold</b> take off</span></span>'
-      + '<span id="keysFly"><span><b>tilt</b> bank &amp; pitch</span><span><b>drag</b> steer</span>'
-      + '<span><b>hold</b> flap · <b>tap</b> beat</span><span><b>fly/land</b> button lands</span></span>'
+      '<span id="keysWalk"><span><b>tilt</b> steer</span><span><b>left hold</b> walk</span>'
+      + '<span><b>left tap</b> take off</span><span><b>right drag</b> look</span></span>'
+      + '<span id="keysFly"><span><b>tilt</b> bank &amp; pitch</span>'
+      + '<span><b>right hold</b> flap · <b>tap</b> beat</span>'
+      + '<span><b>left tap</b> land · <b>hold</b> speed</span><span><b>right drag</b> steer</span></span>'
       + '<span><b>two-finger double-tap</b> re-levels</span>';
     const note = document.querySelector('#panel .note');
     if(note) note.innerHTML = 'Tap the gear to close, tap the view to close.  '
@@ -13884,6 +14485,26 @@ function bindInput(){
     }
   };
   addEventListener('visibilitychange', idleGate);
+  /*  §M1c — portrait is a NON-PLAY pose on glass (the PWA build veils the view
+      in portrait): auto-pause mirrors the hidden-tab gate above — pause + mute
+      on entering portrait, restore on returning to landscape.  Touch-gated, so
+      desktop windows (any aspect) and the bench suites never see it.        */
+  if(Input.hasTouch && window.matchMedia){
+    const pq = matchMedia('(orientation: portrait)');
+    let portPaused = false, portMuted = false;
+    const pGate = ()=>{
+      if(BENCH || navigator.webdriver) return;
+      if(pq.matches){
+        if(!State.paused){ State.paused = true; portPaused = true;
+          if(audio.ok && audio.ctx && audio.ctx.state==='running'){ audio.suspendNow(); portMuted = true; } }
+      } else if(portPaused){
+        portPaused = false; State.paused = false;
+        if(portMuted){ audio.resume(); portMuted = false; }
+      }
+    };
+    if(pq.addEventListener) pq.addEventListener('change', pGate); else pq.addListener(pGate);
+    pGate();
+  }
 
   /*  The sliders' hardcoded value="100" used to win over ?d=/?s=: bind()'s
       eager fire overwrote State and then scheduled a redundant buildTargets()
@@ -13995,6 +14616,18 @@ function bindInput(){
         inside this same gesture (GH-Pages route; the wrapper's CoreMotion
         bridge needs no permission and simply out-ranks it).                  */
     if(Input.hasTouch){ TiltCtl.cal(); TiltCtl.browser(); }
+    /*  §M1e — glass plays truly fullscreen: the entry gesture is the ONE moment
+        the OS lets a page hide its clock/battery furniture (the Fullscreen API
+        needs a user gesture; standalone web apps otherwise keep the status
+        bar).  Touch-gated: desktop keeps its window exactly as it was.  If the
+        person swipes the bars back later, the game simply plays on under them —
+        never re-request outside a fresh entry gesture.  The resulting viewport
+        change lands in the §M1d resize/visualViewport re-sync.               */
+    if(Input.hasTouch){
+      const el = document.documentElement;
+      const rf = el.requestFullscreen || el.webkitRequestFullscreen;
+      if(rf) try{ const p = rf.call(el); if(p && p.catch) p.catch(()=>{}); }catch(e){}
+    }
     $('#veil').classList.add('gone');
     $('#hud').classList.add('on');
     setTimeout(()=>{ $('#veil').style.display='none'; }, 1700);
