@@ -4,9 +4,10 @@ A quiet valley to fly and explore.
 
 **[▶ Play now](https://atominnovationth.github.io/Hoshi/)** — be flying in 10 seconds.
 
-Press **spacebar** and your feet leave the grass.
-Wander with the mouse or the arrow keys.
-Soar, swoop, land on trees, trains and cliff walls; ride the ridge lift; thermal up to cloudbase.
+- Press **spacebar** and your feet leave the grass.
+- Wander around with the mouse or the arrow keys.
+- Soar, swoop, dive thru Torii, land on trees...
+- Ride ridge lift, thermal to cloudbase...
 
 [![The viaduct over the river at first light, the village on the far bank, mountains behind](screenshots/hero.png)](screenshots/hero.png)
 
