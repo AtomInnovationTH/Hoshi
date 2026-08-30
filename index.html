@@ -50,6 +50,10 @@
   #enter:hover{background:rgba(255,252,244,.72);letter-spacing:.34em}
   #enter.on{display:inline-block;animation:rise .9s cubic-bezier(.2,.8,.2,1) both}
   @keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+  /* §M3 — the motion-popup heads-up for RETURNING players (touch-only, JS-gated:
+     first-runs get the popup inside the lesson's grip card instead) */
+  #allowNote{display:none;margin-top:14px;font-size:11.5px;font-style:italic;
+    letter-spacing:.06em;opacity:.55;color:#26364B}
 
   /* ---------- hud ---------- */
   #hud{position:fixed;left:0;right:0;bottom:0;z-index:20;pointer-events:none;
@@ -128,6 +132,26 @@
     color:var(--cream);background:rgba(20,27,38,.66);border:1px solid rgba(246,236,216,.22);
     backdrop-filter:blur(8px);-webkit-user-select:none;user-select:none;touch-action:manipulation}
   #touchUI button:active{background:rgba(143,190,168,.4)}
+  /* §M3 — FIRST STEPS (touch onboarding): one soft card, bottom-middle, pure DOM.
+     pointer-events:none throughout — the card never eats a touch; display is
+     driven only by the OB module, so desktop never shows a pixel of it. */
+  #ob{display:none;position:fixed;left:0;right:0;bottom:calc(84px + env(safe-area-inset-bottom));
+    z-index:23;justify-content:center;pointer-events:none}
+  #obCard{max-width:min(520px,80vw);text-align:center;padding:16px 26px 13px;border-radius:22px;
+    background:rgba(20,27,38,.66);border:1px solid rgba(246,236,216,.16);backdrop-filter:blur(12px);
+    transition:opacity 1.2s}
+  #ob.bye #obCard{opacity:0}
+  #obArt svg{overflow:visible}
+  #obTxt{font-size:15px;line-height:1.6;letter-spacing:.02em;opacity:.95}
+  #obDots{margin-top:9px;display:flex;justify-content:center;gap:8px}
+  #obDots i{width:7px;height:7px;border-radius:50%;background:var(--cream);opacity:.2;transition:.4s}
+  #obDots i.on{opacity:.95;transform:scale(1.3)}
+  #obDots i.was{opacity:.55}
+  #obCard.nod{animation:obnod .5s ease}
+  @keyframes obnod{0%,100%{transform:none}30%{transform:translateX(-7px)}60%{transform:translateX(6px)}}
+  @keyframes obpulse{0%,100%{opacity:.3}50%{opacity:.95}}
+  #ob .obPulse{animation:obpulse 1.7s ease-in-out infinite}
+  #hud.ob #keys{display:none}   /* the lesson owns the teaching — the key hints wait */
   @media (pointer:coarse){
     body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
     canvas{touch-action:none}
@@ -218,6 +242,7 @@
 
 <div id="flash"></div>
 <div id="toast"></div>
+<div id="ob"><div id="obCard"><div id="obArt"></div><div id="obTxt"></div><div id="obDots"></div></div></div>
 <div id="touchUI">
   <button id="tFly" type="button">fly</button>
   <button id="tPause" type="button">pause</button>
@@ -236,6 +261,7 @@
     <div id="bar"><div id="barIn"></div></div>
     <div id="stat">preparing</div>
     <button id="enter">Enter the valley</button>
+    <p id="allowNote">if the iPad asks about motion, choose Allow</p>
   </div>
 </div>
 
@@ -1929,6 +1955,36 @@ let PATH_DF = null;
 function bakeSplat(){
   const R = CFG.dataRes;
   PATH_DF = makeDF(PATH_PTS.map((p,i)=>({x:p[0], z:p[1], t:i/PATH_PTS.length})), 384);
+  /* §31.V8R2 — the lotus spur + the bridge landing's grass-free footprint
+     (T1 "grasss is growing up thru the bridge" / T2 "add a branch to lotus").
+     The landing capsule re-derives the door axis from the SAME constants
+     buildLotusShrine uses (CFG.spawn ↔ the (-63,145) siting — L-2).        */
+  let SPUR_DF = null, lbAx = 0, lbAz = 0, lbUx = 0, lbUz = 0, lbL = 0;
+  if(State.lotus){
+    SPUR_DF = makeDF(SPUR_PTS.map((p,i)=>({x:p[0], z:p[1], t:i/SPUR_PTS.length})), 384);
+    /* §31.V8R2D T2 — the on-land assert: every spur sample must clear the
+       local water line by 0.15 m (the old tail waded 2.3 m deep).  Bake-time
+       only (121 samples, once); __SPURDRY is the probe surface for benches. */
+    { let mn = 1e9, bad = 0;
+      for(const p of SPUR_PTS){
+        const mg = sampleHeight(p[0], p[1]) - waterLevel(riverField(p[0], p[1]).t);
+        if(mg < mn) mn = mg;
+        if(mg < 0.15){ bad++; if(bad < 4) console.warn('[V8R2D T2] spur sample in water:', p[0].toFixed(1), p[1].toFixed(1), 'margin', mg.toFixed(2)); }
+      }
+      window.__SPURDRY = { min: +mn.toFixed(3), bad };
+    }
+    const lyaw = Math.atan2(CFG.spawn.x - (-63), CFG.spawn.z - 145);
+    lbUx = Math.sin(lyaw); lbUz = Math.cos(lyaw);
+    /* §31.V8R2D T1 — the capsule MOVES to the REAL bank run.  V8R2 placed it
+       at s 3.8→7.2 believing the landing sat there — that segment is OPEN
+       WATER (probed −2.5…−2.2 m vs the waterline; the splat there is already
+       bare, so the capsule was a no-op and blades could still rise through
+       the buried tail).  The deck meets the bank where the axis march quits:
+       waterline s≈12.6, buried tail to s1w≈16.7 (+0.7 slack) — bare
+       s 11.8→17.4 within the same 1.35 m half-width.                       */
+    lbAx = -63 + lbUx*11.8; lbAz = 145 + lbUz*11.8;
+    lbL  = 17.4 - 11.8;
+  }
   /*  §V10B B1b — the S0 gate's crag radius, hoisted once for the mouth fade
       (LAW 2: derived from the routeStations table, never re-typed).         */
   let _s0r9 = 0;
@@ -1956,10 +2012,18 @@ function bakeSplat(){
       mask *= lerp(1, 0.42, smoothstep(VILLAGE.r*0.70, VILLAGE.r*0.16, dv));
       const dp = PATH_DF(wx,wz).d;
       mask *= smoothstep(0.7, 2.4, dp);
+      if(SPUR_DF) mask *= smoothstep(0.7, 2.4, SPUR_DF(wx,wz).d);   // §31.V8R2 — the spur bares like the footpath (ragged edge applies below)
       if(TRACK){ const tf = TRACK.field(wx,wz); mask *= smoothstep(1.8, 4.6, tf.d); }
       const rag = fbm2(wx*0.085+13.7, wz*0.085-5.3, 3)
                 + noise2(wx*0.27, wz*0.27)*0.35;
       mask = clamp(mask*1.30 - 0.09 + rag*0.20, 0, 1);
+      if(SPUR_DF){
+        /* §31.V8R2 T1 — the deck's bank footprint is HARD bare (post-rag,
+           the crag-cap idiom): no blade may rise through the stone.        */
+        const t9 = clamp((wx-lbAx)*lbUx + (wz-lbAz)*lbUz, 0, lbL);
+        const dq = Math.hypot(wx-(lbAx+lbUx*t9), wz-(lbAz+lbUz*t9));
+        mask *= smoothstep(1.35, 2.6, dq);
+      }
       // §W2-C6 — the crag is bare stone on the pillar and its lip (blades at the
       // ragged lip ring read as floating grass over the drop).  smoothstep(36,46):
       // 0 inside the lip, full meadow by 46 m — NOT the reversed idiom (that bared
@@ -2172,6 +2236,33 @@ const PATH_CTRL = [
   [ -212, 152],[ -268, 150],[ -318, 132],[ -352, 104],
 ];
 const PATH_PTS = (()=>{ const a=[]; for(let i=0;i<=420;i++){ const p=catmull(PATH_CTRL,i/420); a.push(p);} return a; })();
+/* §31.V8R2 — the lotus spur: a branch of the same footpath to the stone
+   bridge's landing ("there is a path thru the grass nearby, add a branch to
+   lotus").  Junction on the [-30,96]→[-96,120] leg, a lazy S up the bank.
+   It bares/paints through the SAME splat mask as the footpath — no heightmap
+   touch, and it exists only under ?lotus=1 (L-1: the flagless world stays
+   byte-identical).
+   §31.V8R2D T2 ("nope, goes into river near bridge") — TWO faults fixed.
+   (1) The old tail aimed at (-61.3,139.3): that figure was the WALK-IN POSE
+   6.4 m from the bloom, a point 2.3 m under water — not the shore.  The
+   bridge's own march (the shoreS loop in buildLotusShrine) lands its buried
+   tail at cw0 ≈ (-58.3,129.8), margin +1.4 m (probed).  (2) catmull() maps
+   t so the FIRST and LAST control points are tangent HANDLES, not on-curve
+   (s = t·(n−2)+1): the old 5-point spur actually ENDED at its 4th point —
+   the painted trail stopped at the water's edge pointing into the river.
+   Six points now: the landing IS the last on-curve point, and the end
+   handle turns the arrival tangent into the bridge axis so the last metres
+   face the deck.  Every sample is asserted on land at bake time
+   (window.__SPURDRY, min margin ≥ +0.15).                                   */
+const SPUR_CTRL = [
+  [ -76.5, 108.6],[ -71.6, 110.9],[ -67.2, 121.0],[ -63.5, 127.5],
+  [ -57.8, 130.0],[ -58.7, 132.9],
+  /* §31.V8R2D checkpoint ("at river move path to the left, up river, about
+     .5 meter so it centers on the bridge"): arrival + end handle shifted
+     +0.5 m along the axis LEFT/upriver lateral (0.955,0.298) from cw0 —
+     the walked trail now centres on the bridge mouth.  Verify next session. */
+];
+const SPUR_PTS = (()=>{ const a=[]; for(let i=0;i<=120;i++){ const p=catmull(SPUR_CTRL,i/120); a.push(p);} return a; })();
 function pathDistance(x,z){
   let best=1e9;
   for(let i=0;i<PATH_PTS.length;i+=3){
@@ -4754,6 +4845,8 @@ const WATER_FS = ()=> /* glsl */`
 precision highp float;
 ${GL_UNI}
 uniform vec2 uMeanWind;
+uniform vec4 uLotusGlow;
+uniform vec4 uLotusHull;
 uniform sampler2D uReflect;
 uniform float uReflectOn;
 uniform float uReflectPlane;
@@ -4891,6 +4984,28 @@ void main(){
 
   col += K_SUN * pow(clamp(dot(V,-uSunDir),0.0,1.0), 5.0) * 0.16 * sh;
   col = aerial(col, vDist, V, P.y);
+  /* §30.6 V8-T5 — the water remembers the light (uLotusGlow: x,z,radius,
+     strength; strength 0 = branch never taken, byte-identical water).  The
+     warm band is stretched ~2.5x ALONG the view — the elongated reflection
+     is what makes a lantern read as ON the water — and composes after the
+     haze so it still reads from across the valley. */
+  if(uLotusGlow.w > 0.001){
+    vec2 dgl = P.xz - uLotusGlow.xy;
+    vec2 va = normalize(P.xz - uCamPos.xz + vec2(1e-4, 0.0));
+    vec2 vp = vec2(-va.y, va.x);
+    float ea = dot(dgl, va)/2.5, eb = dot(dgl, vp);
+    float rr2 = (ea*ea + eb*eb)/(uLotusGlow.z*uLotusGlow.z);
+    float glw = exp(-rr2*3.0) * uLotusGlow.w * (0.40 + 0.60*smoothstep(40.0, 260.0, vDist));
+    col += vec3(1.0, 0.60, 0.28) * glw;
+  }
+  /* §30.6 V8R — CONTACT: the pond darkens where the bloom sits IN it (hull
+     lee + the skirt's shade), the "floating, not hovering" ground truth.
+     x = skirt reach (m), y = strength; y 0 = branch never taken.           */
+  if(uLotusHull.y > 0.001){
+    float dc = length(P.xz - uLotusGlow.xy);
+    float wet = 1.0 - smoothstep(uLotusHull.x*0.55, uLotusHull.x, dc);
+    col *= 1.0 - wet*uLotusHull.y;
+  }
   outColor = vec4(SAFE3(col), gFogAmt);
 }`;
 
@@ -6058,20 +6173,29 @@ function finishPainted(M){
     flags FULLY-buried boxes (y+hy < sampleHeight − 0.6) for the integrator. */
 const dreg = (n, x, y, z, hy) => { (window.__DRESS = window.__DRESS || []).push({ n, x, y, z, hy }); };
 
-const PAINTED_VS = ()=> /* glsl */`
+const PAINTED_VS = (lotus) => /* glsl */`
 ${GL_UNI}
+${lotus ? `
+uniform vec4 uLotusSway;` : ''}
 in vec3 nrm; in vec3 vcol; in float vmat;
 out vec3 vW; out vec3 vN; out vec3 vC; out float vM; out float vDist;
 void main(){
   vec4 wp = modelMatrix*vec4(position,1.0);
+${lotus ? `
+  /* §30.5 V8-T4 — petal sway: lean by height above the float plane, on the
+     same wind beat as the grass (uLotusSway.xy from windAtJS; .z = floatY).
+     A squall crosses the bloom on the beat it crosses the meadow. */
+  wp.xz += uLotusSway.xy * max(wp.y - uLotusSway.z, 0.0);` : ''}
   vW = wp.xyz; vN = normalize(mat3(modelMatrix)*nrm); vC=vcol; vM=vmat;
   vec4 mv = viewMatrix*wp; vDist=-mv.z;
   gl_Position = projectionMatrix*mv;
 }`;
 
-const PAINTED_FS = ()=> /* glsl */`
+const PAINTED_FS = (lotus) => /* glsl */`
 precision highp float;
 ${GL_UNI}
+${lotus ? `
+uniform vec4 uLotusSway;` : ''}
 ${GL_PAL()}${GL_HASH}${GL_NOISE}${GL_TERRAIN}
 ${GL_CLOUDFIELD}${GL_SHADOW}${GL_LIGHT}${GL_AIR}
 in vec3 vW; in vec3 vN; in vec3 vC; in float vM; in float vDist;
@@ -6096,7 +6220,14 @@ void main(){
     float blg2 = 1.0 - smoothstep(0.10, 0.22, wg2);
     if(blg2 > 0.001) g2 = mix(0.5, pn2(vW.xz*17.0 - vW.y*9.0)*0.5+0.5, blg2);
   }
-  base *= 0.90 + 0.20*g + 0.06*g2;
+${lotus ? `  /* §30.6 V8R — petals are SILK, not plaster: the mineral speckle is what
+     read as "stone like the village walls" — petals keep only a soft wash
+     of the coarse octave; stone/gold/glow keep the full mineral grain.
+     §31.V8R2 — mat 8 = the bridge stone: NO speckle at all.  The band-limit
+     retire frontier tracks the walker on a long deck, which is the
+     "patterns on bridge are moving" verdict — carved granite reads through
+     vertex tone + curb geometry alone, dead-steady at every distance.     */
+  if(vM > 7.5){ } else if(vM > 6.5){ base *= 0.965 + 0.07*g; } else ` : ''}base *= 0.90 + 0.20*g + 0.06*g2;
 
   // lit / mid / shade travel along a hue path, never a brightness ramp
   vec3 lit = base*1.12;
@@ -6106,7 +6237,13 @@ void main(){
 
   if(vM > 1.5 && vM < 2.5){                 // lit window
     float flick = 0.94 + 0.06*sin(uTime*2.1 + vW.x*3.1 + vW.z*1.7);
-    outColor = vec4(SAFE3(base*2.4*flick + K_SUN*0.25), 0.0);
+${lotus ? `
+    /* §30.6 V8-T5 — the Lantern Bloom: the door/floor glow GROWS past 150 m
+       instead of shrinking into the dusk — a lantern on dark water from
+       across the valley (the lit-window branch already skips aerial haze) */
+    float lamp = 1.0 + 1.6*smoothstep(150.0, 520.0, vDist);
+    outColor = vec4(SAFE3(base*2.4*flick*lamp + K_SUN*0.25), 0.0);` : `
+    outColor = vec4(SAFE3(base*2.4*flick + K_SUN*0.25), 0.0);`}
     return;
   }
   if(vM > 0.5 && vM < 1.5){                 // painted metal: crisper bands
@@ -6144,12 +6281,27 @@ void main(){
     lit *= grain; mid *= grain; shd *= grain;
     rim = 0.34;
   }
+${lotus ? `
+  if(vM > 6.5 && vM < 7.5){                 // §30.6 V8R — petal silk: warm shade, never stone-grey
+    lit = base*1.14;
+    mid = mix(base*0.82, vec3(1.0, 0.90, 0.72)*0.55, 0.14);
+    shd = mix(base*0.55, vec3(1.0, 0.78, 0.55)*0.42, 0.30);
+    rim = 0.52;
+  }
+  /* §31.V8R2D T1 — "not steady, learn from the walls": the walls read stable
+     because NOTHING view-coupled draws ON the face (small one-band boxes; the
+     backlight rim only catches silhouette edges).  A long deck at eye level is
+     ALL grazing: the fres(N,V)*back(V,sun) wash re-weights with every step and
+     slides along the span — the last moving pattern after V8R2 killed speckle
+     and jit.  Mat 8 carries NO rim; curbs, wet waterline tone and vertex drift
+     carry the carved-stone read, all baked and dead-steady.                 */
+  if(vM > 7.5){ rim = 0.0; }` : ''}
   /*  §32 V7R-P2 — the blossom mat (6): the sakura lumps carried the generic
       rim 0.30, and a crown without a sun-side grazing rim pop is what reads
       "marshmallow" against the sky (Lane E, task 7).  Rim gain + an N.y-keyed
       cool-down on the shaded family: undersides deepen toward rose instead of
       grey.  Only the canopy lumps carry mat 6 — plaster walls stay mat 0.    */
-  if(vM > 5.5){
+  if(vM > 5.5${lotus ? ' && vM < 6.5' : ''}){
     rim = 0.55;
     float und = 1.0 - smoothstep(-0.55, 0.15, N.y);
     shd *= mix(vec3(1.0), vec3(0.86, 0.76, 0.94), und * 1.35);   // §34 V7R3-D1 — underside violet strength ~+35% (one notch; the 0.27-class weight the plan named was a bare und here, so scale it 1.35x; mix clamps at full violet for fully-down normals)
@@ -6171,9 +6323,25 @@ void main(){
       and grass keep the full painterly stroke.                              */
   s.soft = mix(0.105, 0.19, clamp(vDist*0.004,0.0,1.0));
   s.jit = (vn2(vW.xz*3.9 + vW.y*1.7) - 0.5)*0.030;
-  s.shadow=sh; s.trans=0.0; s.transCol=vec3(0.0);
+${lotus ? `  /* §30.6 V8R — petal translucency: sun THROUGH the silk (petals and the
+     green skirt both transmit their own colour, warmed).  §31.V8R2 — mat 8
+     bridge stone: zero band jitter (dead-steady) and no translucency.
+     §31.V8R2D T1 — and a FIXED wide band softness: s.soft rides vDist, so on
+     a walked deck every tone boundary sharpens/breathes with camera distance
+     (the walls never show this — no boundary crosses a small face).  One
+     constant width = the boundary that does cross the long arc stays put.  */
+  if(vM > 7.5){ s.jit = 0.0; s.soft = 0.19; }
+  s.shadow=sh; s.trans = (vM > 6.5 && vM < 7.5) ? 0.22 : 0.0; s.transCol = base*vec3(1.06, 0.94, 0.72);` : `  s.shadow=sh; s.trans=0.0; s.transCol=vec3(0.0);`}
   s.rim=rim; s.ao=ao; s.ambient=1.0;
   vec3 col=paint(s);
+${lotus ? `
+  /* §30.6 V8-T5 — the petals' undersides catch their own door light at the
+     waterline (no light system exists: this IS the invisible emissive quad
+     under the cup, folded into the lotus-only program) */
+  {
+    float und = clamp(-N.y, 0.0, 1.0) * (1.0 - smoothstep(0.5, 4.0, vW.y - uLotusSway.z));
+    col += vec3(1.0, 0.70, 0.36) * und * 0.10;
+  }` : ''}
   col=aerial(col,vDist,V,vW.y);
   outColor = vec4(SAFE3(col), gFogAmt);
 }`;
@@ -6612,9 +6780,63 @@ function onDeck(x, z, curY){
   const sd = dx*BR.pp[0] + dz*BR.pp[1];
   return Math.abs(al) <= BR_L && Math.abs(sd) <= BR.width/2;
 }
+/*  §30.2 V8-T1 — the lotus temple's walkable surfaces (the deck idiom, third
+    customer after the bridge deck and the crag equation).  LOTUS is null until
+    buildLotusShrine() runs under ?lotus=1, so default URLs never pay the test.
+    Surfaces are flat analytic pads (discs + yaw-OBBs) registered at build time
+    from the SAME frozen numbers as the geometry; the whole-bloom bob offset
+    (LOTUS.bob.dy, §30.5) rides on top so physics can never drift from render.
+    The curY gate (top − gate) means: step/land/climb onto a pad from anywhere
+    at comparable height — including wading out of the river onto the drum
+    (recovery reads kind, §30.3's "falling off is readable") — while a wader
+    4+ m under a surface passes beneath it untouched.  V8R: the lily-pad
+    causeway became ONE arched stone bridge (analytic deck, its own gate).  */
+let LOTUS = null;
+function lotusTopAt(x, z, curY){
+  const L = LOTUS;
+  let best = -1e9;
+  const dxb = x - L.x, dzb = z - L.z;
+  if(dxb*dxb + dzb*dzb < L.bloomRR){             // bloom broad-phase (derives from the pads, V8R)
+    const bob = L.bob.dy;
+    for(let i=0;i<L.pads.length;i++){
+      const p = L.pads[i];
+      const t = p.top + bob;
+      if(t <= best || curY < t - 4.2) continue;
+      if(p.hx !== undefined){                    // yaw-aligned box (mondop steps)
+        const lx =  (x-p.x)*L.ca + (z-p.z)*L.sa;
+        const lz = -(x-p.x)*L.sa + (z-p.z)*L.ca;
+        if(Math.abs(lx) <= p.hx && Math.abs(lz) <= p.hz) best = t;
+      } else {                                   // flat disc (drum, cup, petal pads)
+        const dx = x-p.x, dz = z-p.z;
+        if(dx*dx + dz*dz <= p.r*p.r) best = t;
+      }
+    }
+  }
+  if(L.cwB){                                     // §30.3 V8R — the stone bridge deck
+    const dxc = x - L.cwC.x, dzc = z - L.cwC.z;
+    if(dxc*dxc + dzc*dzc < L.cwC.rr){
+      const b = L.cwB;
+      const s   =  dxb*b.dirX + dzb*b.dirZ;      // along the door axis, from the bloom centre
+      const lat = -dxb*b.dirZ + dzb*b.dirX;
+      if(s >= b.s0 && s <= b.s1w && Math.abs(lat) <= b.hw){
+        const t = Math.min(1, Math.max(0, (s - b.s0)/b.span));
+        const top = b.yA + (b.yB - b.yA)*t + b.rise*Math.sin(Math.PI*t)
+                  + (Math.abs(lat) > b.iwc ? 0.115 : 0.035);   // curb lip / deck crown
+        /* gate 1.2 m, NOT the pads' 4.2: a wader passing UNDER the arch must
+           never be teleported onto the crown — the bridge is entered from the
+           shore, the drum, or the air (falling off is bounded by the curbs). */
+        if(top > best && curY > top - 1.2) best = top;
+      }
+    }
+  }
+  return best;
+}
 function groundHeightAt(x, z, curY){
   const h = cragGroundAt(x, z);   // §35 V8S: ≡ sampleHeight everywhere except the crag's frozen core, where the walkable surface IS the equation (the deck idiom, one line below, is the precedent)
-  return onDeck(x, z, curY) ? Math.max(h, BR.deck + 0.02) : h;
+  const base = onDeck(x, z, curY) ? Math.max(h, BR.deck + 0.02) : h;
+  if(LOTUS === null) return base;
+  const lt = lotusTopAt(x, z, curY);
+  return lt > base ? lt : base;
 }
 // resolves a proposed position against the buildings and the bridge parapets
 const _res = [0,0];
@@ -8476,6 +8698,9 @@ void main(){
     gl_Position = vec4(2.0,2.0,2.0,1.0); return;   // never let a bad particle
   }                                                // become a black square
   vec3 wp = iP.xyz + vR*(c.x*sz) + vU*(c.y*sz);
+  /* §30.5 V8-T4 — kind 7+ lies FLAT on the water (lotus ripple rings): world
+     axes replace the camera basis; no pool spawns kind 7 unless ?lotus=1 */
+  if(iQ.w > 6.5){ wp = iP.xyz + vec3(c.x*sz, 0.0, c.y*sz); }
   vW = wp;
   vec4 mv = viewMatrix*vec4(wp,1.0); vDist=-mv.z;
   gl_Position = projectionMatrix*mv;
@@ -8539,6 +8764,18 @@ out vec4 outColor;
 void main(){
   float r=length(vC);
   if(!(r <= 1.0)) discard;                 // NaN-safe
+  /* §30.5 V8-T4 — lotus fireflies (kind 3+): warm self-lit points on a slow
+     blink, indifferent to the sun (they work against the permanent dusk).
+     Nothing spawns kind 3 in this pool family without the lotus flag. */
+  if(vKind > 2.5){
+    float blink = 0.30 + 0.70*pow(0.5 + 0.5*sin(uTime*(0.5 + fract(vSeed*0.171)*1.1) + vSeed*7.0), 2.4);
+    vec3 fcol = vec3(1.0, 0.84, 0.44) * (0.9 + 1.3*blink);
+    float fa = smoothstep(1.0, 0.2, r);
+    fa *= fa * vOp * blink;
+    if(!(fa > 0.004)) discard;
+    outColor = vec4(SAFE3(fcol), clamp(fa, 0.0, 1.0));
+    return;
+  }
   float a = smoothstep(1.0, 0.15, r);
   a *= a;
   vec3 V=normalize(uCamPos-vW);
@@ -8598,7 +8835,19 @@ in vec3 vW; in vec3 vR; in vec3 vU; in vec3 vF; in float vDist;
 out vec4 outColor;
 void main(){
   vec3 base; float a;
-  ${State.cragrocky ? `
+  /* §30.5 V8-T4 — the lotus ripple (kind 7): an expanding ring lying flat on
+     the water (PARTICLE_VS orients it), a soft band that thins and fades as
+     it grows — it reads at dusk because it catches the sky.  FIRST in the
+     cascade; nothing spawns kind 7 without the lotus flag. */
+  if(vKind >= 6.5){
+    float rr = length(vC);
+    if(!(rr <= 1.0)) discard;
+    float ring = mix(0.10, 0.88, vAge);
+    float band = 0.15*(1.0 - vAge*0.45);
+    a = 1.0 - smoothstep(0.0, band, abs(rr - ring));
+    a *= a * 0.5 * (1.0 - vAge);
+    base = vec3(0.87, 0.92, 0.97);
+  } else ${State.cragrocky ? `
   // D3 - the sakura petal (kind 6): a soft pink rounded flake, FIRST in the
   // cascade (DRIFT_FS consumes the whole kind range; without this early branch
   // kind 6 would fall through to the splash test and read as a bright disc)
@@ -9055,6 +9304,7 @@ class Walker {
     this._ride=null;                                                // §W2-B6: riding the train roof {ci}, null = not riding
     this._soarT=0; this._soarEsc=[-1,-1];  // §T14b shared-soar clock + escort stations
     this._ridgeT=0; this._bubT=0; this._mliftT=0;   // §W5-E5 keepsake clocks
+    this._lotusThT=0; this._lotusD2=1e9;            // §30.7 V8-T6 — incense dwell clock + the lotus proximity scalar
     this._ridgeNow=0; this._mlift=0;                // §W5-E5 per-source lift shares
     this.onFootstep=null;
     this.windLean=new THREE.Vector2();
@@ -9162,6 +9412,15 @@ class Walker {
         this._orbitAcc = 0;
       }
     } else { this._orbitAcc = 0; this._lastCragB = undefined; }
+    /*  §30.7 V8-T6 — the lotus proximity scalar (the §29.1 T0.3 family: ONE
+        distance², every lotus hook consumes it) + the discovery: crossing
+        45 m in ANY mode names the temple, paired with the audio approach
+        toll at 40 m so sight and sound land together.                      */
+    if(LOTUS !== null){
+      const dlx = this.pos.x - LOTUS.x, dlz = this.pos.z - LOTUS.z;
+      this._lotusD2 = dlx*dlx + dlz*dlz;
+      if(this._lotusD2 < 2025) first('lotus');
+    } else this._lotusD2 = 1e9;
     /*  §36S V9S-D — the station journal (gōme lines): one quiet hintOnce per
         station while WALKING the route (grounded, within 3.2 m, near the
         station's tread height — the routeStations table is the ONE source,
@@ -9329,8 +9588,17 @@ class Walker {
     else if(k['Space'] && !this.cinematic){
       this._spaceHold += dt;
       if(this._spaceHold >= 0.25){
-        this._spaceHold = 0; this._takeoff();
-        if(typeof toast === 'function') toast(Input.hasTouch ? 'lift-off — tilt to steer' : 'lift-off — look to steer');
+        this._spaceHold = 0;
+        /*  §M3 — while the first-steps lesson is unfinished (touch first-run
+            or a forced/replayed run ONLY — desktop and every headless suite
+            read the lock as off), the takeoff verb is inert: walking is
+            taught before flying.  Landing paths are never gated.           */
+        const _ob = window.__OB;
+        if(_ob && _ob.lockFly()){ _ob.nudge(); }
+        else {
+          this._takeoff();
+          if(typeof toast === 'function') toast(Input.hasTouch ? 'lift-off — tilt to steer' : 'lift-off — look to steer');
+        }
       }
     } else this._spaceHold = 0;
 
@@ -9351,6 +9619,22 @@ class Walker {
       if(SHRINE_POS){
         const dx=this.pos.x-SHRINE_POS.x, dz=this.pos.z-SHRINE_POS.z;
         if(dx*dx+dz*dz<16) first('shrine');
+      }
+      /* §30.3 V8R — the bridge hint, on the shore near the stone landing */
+      if(LOTUS !== null && LOTUS.cw0){
+        const dx=this.pos.x-LOTUS.cw0.x, dz=this.pos.z-LOTUS.cw0.z;
+        if(dx*dx+dz*dz<400) hintOnce('lotusBridge', 'a stone bridge arcs out to it');
+      }
+      /* §30.7 V8-T6 — 'stepped inside the light': standing in the doorway's
+         glow (the threshold OBB — the shrine room itself is knee-high to a
+         walker, so the light pool on the steps IS the inside).  Earns the
+         fullest ring, E3+B3+E4.                                            */
+      if(LOTUS !== null && this._lotusD2 < 46){
+        const dx=this.pos.x-LOTUS.thresh.x, dz=this.pos.z-LOTUS.thresh.z;
+        const lx =  dx*LOTUS.ca + dz*LOTUS.sa, lz = -dx*LOTUS.sa + dz*LOTUS.ca;
+        if(Math.abs(lx) < LOTUS.thresh.hx && Math.abs(lz) < LOTUS.thresh.hz){
+          if(first('lotusIn') && audio && audio.lotusRing) audio.lotusRing(true);
+        }
       }
       // §W2-C6 — standing on the lookout cap (the flat 15 m crown of the pillar)
       if(State.crag
@@ -9520,6 +9804,56 @@ class Walker {
     const accel = moving ? 9.5 : 12.0;
     this.vel.x += (target.x-this.vel.x)*clamp(accel*dt,0,1);
     this.vel.z += (target.z-this.vel.z)*clamp(accel*dt,0,1);
+
+    /* §31.V8R2 — the bloom rail ("too easy to fall off lotus into river.
+       Need invisble rails or magent like the path up crag?"): while GROUNDED
+       on the bloom, outward radial velocity dies where the next step (0.38 m)
+       leaves the walkable tops with the riverbed under the toes — the drum
+       rim and pad tips carry you along their curve instead of over them.
+       The deck needs no special case (its analytic top answers the probe),
+       the deck→bank exit reads the BANK height (not water) and stays open,
+       inward motion is never damped, and flight ignores the rail entirely —
+       the petal perch pads stay flight territory, leaving stays deliberate. */
+    if(!this.fly && LOTUS && this._lotusD2 < LOTUS.bloomRR){
+      const dxL = this.pos.x - LOTUS.x, dzL = this.pos.z - LOTUS.z;
+      const rL = Math.hypot(dxL, dzL);
+      if(rL > LOTUS.drumR - 1.2 && lotusTopAt(this.pos.x, this.pos.z, this.groundY) > -1e8){
+        const uxL = dxL/rL, uzL = dzL/rL;
+        const a1x = this.pos.x + uxL*0.38, a1z = this.pos.z + uzL*0.38;
+        if(lotusTopAt(a1x, a1z, this.groundY) < -1e8 &&
+           sampleHeight(a1x, a1z) < LOTUS.floatY - 0.6){
+          const voL = this.vel.x*uxL + this.vel.z*uzL;
+          if(voL > 0){ this.vel.x -= uxL*voL; this.vel.z -= uzL*voL; }
+        }
+      }
+    }
+
+    /* §31.V8R2D T5 — the DECK rail ("maybe, add rail on bridge after 1 meter
+       from land"): the bloom-rail idiom, curb-relative instead of radial.
+       Grounded ON the deck corridor and more than a metre of walk from the
+       landing (s < s1w−1.0), OUTWARD lateral velocity past the inner curb
+       line (iwc) dies — the curbs carry you along the arc the way the drum
+       rim carries you along its curve.  The LAST METRE stays free (stepping
+       off at the bank is never fought), inward is never damped, tangential
+       glides, and flight ignores the rail (walkers cannot hop — the V8R2
+       tuition; leaving the bridge midspan stays a deliberate flight act).  */
+    if(!this.fly && LOTUS && LOTUS.cwB){
+      const bC = LOTUS.cwB;
+      const dxc = this.pos.x - LOTUS.cwC.x, dzc = this.pos.z - LOTUS.cwC.z;
+      if(dxc*dxc + dzc*dzc < LOTUS.cwC.rr){
+        const dxL = this.pos.x - LOTUS.x, dzL = this.pos.z - LOTUS.z;
+        const sD   =  dxL*bC.dirX + dzL*bC.dirZ;
+        const latD = -dxL*bC.dirZ + dzL*bC.dirX;
+        if(sD >= bC.s0 && sD < bC.s1w - 1.0 && Math.abs(latD) > bC.iwc
+           && Math.abs(latD) <= bC.hw + 0.05
+           && lotusTopAt(this.pos.x, this.pos.z, this.groundY) > -1e8){
+          const sgn = latD < 0 ? -1 : 1;
+          const lux = -bC.dirZ*sgn, luz = bC.dirX*sgn;      // outward lateral unit
+          const vLat = this.vel.x*lux + this.vel.z*luz;
+          if(vLat > 0){ this.vel.x -= lux*vLat; this.vel.z -= luz*vLat; }
+        }
+      }
+    }
 
     if(this.fly){
       /*  Gliding flight.  ATTITUDE sets the glide line: point up and you climb,
@@ -9750,6 +10084,11 @@ class Walker {
             this._perch = rf.top;                 // straddling the ridge, walker ground
             this.vel.set(0,0,0); this._flareT = 0.6;
             if(audio && audio.whoosh) audio.whoosh(0.08);
+            /* §30.4 V8-T3 — the spire is the temple's ridge: perching rings it */
+            if(LOTUS !== null && rf === LOTUS.roof.r){
+              if(audio && audio.lotusRing) audio.lotusRing(false);
+              if(typeof toast === 'function') toast('spire perch — space to fly');
+            } else
             if(typeof toast === 'function') toast('roof-ridge perch — space to fly');
           }
         }
@@ -9832,6 +10171,17 @@ class Walker {
       if(State.thermflow){
         if((State._bubK||0) > 0.4) this._bubT += dt; else this._bubT = Math.max(0, this._bubT - dt*0.5);
         if(this._bubT > 8) first('bubble');
+      }
+      /*  §30.7 V8-T6 — the incense column: dwell >6 s inside the lotus
+          thermal's core while it breathes (the _mliftT accumulate/half-decay
+          idiom), any height from just over the bloom to the column's fade. */
+      if(LOTUS !== null && LOTUS.th){
+        const inCol = this._lotusD2 < LOTUS.th.r*LOTUS.th.r*1.44
+          && this.freeY !== undefined
+          && this.freeY > LOTUS.floatY + 4 && this.freeY < LOTUS.th.yTop + 95
+          && (LOTUS.th._env ?? 1) > 0.5;
+        if(inCol) this._lotusThT += dt; else this._lotusThT = Math.max(0, this._lotusThT - dt*0.5);
+        if(this._lotusThT > 6) first('incense');
       }
       if(State.microlift){
         if((this._mlift||0) > 0.4) this._mliftT += dt; else this._mliftT = Math.max(0, this._mliftT - dt*0.5);
@@ -10118,6 +10468,13 @@ class Walker {
         this._perch = null;                          // §W2-C3: a normal landing leaves the perch
         this.pitch = clamp(this.pitch, -1.15, 1.05);   // back inside a walker's neck
         if(typeof toast === 'function') toast('landed');
+        /*  §30.4 V8-T3 — you rang the temple: any landing ON the bloom
+            (petal pad, drum, steps) strikes E3+B3 through the valley.      */
+        if(LOTUS !== null && audio && audio.lotusRing){
+          const dxL=this.pos.x-LOTUS.x, dzL=this.pos.z-LOTUS.z;
+          if(dxL*dxL+dzL*dzL < 46 && lotusTopAt(this.pos.x, this.pos.z, this.groundY) > -1e8)
+            audio.lotusRing(false);
+        }
         /*  §29.6 E2 — a shelf landing: same az test as the freeze (gaussian,
             σ=0.21 rad, kept while azM ≥ 0.004) wrapped the boring way, plus
             the shelf's radial band.  Name the prop the shelf carries; a 4-puff
@@ -10408,6 +10765,22 @@ class Audio {
       this.river.bands.push({bq,g,base:g.gain.value, ph:Math.random()*10, sp:0.07+Math.random()*0.22});
     }
 
+    // ── §30.4 V8-T3 LOTUS: the reeds bus + the temple's state ──────────────
+    // Reeds benefit the WHOLE river's margins (the valley's water was silent
+    // at the bank): pink noise through ONE soft bandpass ~600 Hz, breathed
+    // slowly on world position, fading in within ~12 m of the water's edge.
+    // Rides only when the lotus flag is on (L-1: new behaviour ships behind
+    // the flag; at acceptance this bus simply stays).
+    const reSrc = src(this.nPink);
+    const rebp = ctx.createBiquadFilter(); rebp.type='bandpass';
+    rebp.frequency.value=600; rebp.Q.value=0.5;
+    const reG = ctx.createGain(); reG.gain.value=0;
+    reSrc.connect(rebp); rebp.connect(reG); reG.connect(master);
+    const reSend=ctx.createGain(); reSend.gain.value=0.2; reG.connect(reSend); reSend.connect(conv);
+    this.reeds = { gn:reG, ph:0 };
+    this._lotusHum = 3;        // first hum a breath after arrival in earshot
+    this._lotusToll = false;   // §30.4 approach toll — once per SESSION (in-memory)
+
     // ── INSECTS ─────────────────────────────────────────────────────────
     const iSrc = src(this.nWhite);
     const ibq=ctx.createBiquadFilter(); ibq.type='bandpass'; ibq.frequency.value=5600; ibq.Q.value=7;
@@ -10615,6 +10988,14 @@ class Audio {
       o.connect(g); g.connect(out); o.start(t); o.stop(t+Math.max(0.5,d)+0.05);
     }
   }
+  /*  §30.4 V8-T3 — you rang the temple: any landing on the lotus strikes
+      E3+B3 through the valley convolver (note() rides the music bus, 0.85
+      send); stepping into the doorway light earns the fullest ring +E4.    */
+  lotusRing(full){
+    this.note(164.81, 0.12, 5.0);          // E3
+    this.note(246.94, 0.09, 5.0);          // B3
+    if(full) this.note(329.63, 0.07, 6.0); // E4 — 'stepped inside the light'
+  }
 
   // ── per-frame ─────────────────────────────────────────────────────────
   update(dt, cam, walker, state){
@@ -10746,6 +11127,31 @@ class Audio {
 
     // INSECTS — they sing in the sun and fall quiet in shade
     this.insects.g.gain.value += (0.010*clamp(1-near*0.5,0,1) - this.insects.g.gain.value)*clamp(dt,0,1);
+
+    /*── §30.4 V8-T3 LOTUS — the temple announces itself across the water ──*/
+    if(LOTUS !== null){
+      // reeds: alive within ~12 m of ANY water's edge, breathed on position
+      this.reeds.ph += dt*0.23;
+      const edge = rf.d - (riverWidth(rf.t) + 6);            // <0 = over/near water
+      const nearR = clamp(1 - edge/12, 0, 1);
+      const breath = 0.62 + 0.38*(noise2(cam.position.x*0.031 + this.reeds.ph, cam.position.z*0.031)*0.5 + 0.5);
+      this.reeds.gn.gain.value += (0.03*nearR*breath - this.reeds.gn.gain.value)*clamp(dt*1.5,0,1);
+      const ldx = cam.position.x - LOTUS.x, ldz = cam.position.z - LOTUS.z;
+      const ld2 = ldx*ldx + ldz*ldz;
+      // proximity hum: a struck D3 every ~9 s, gain by 1/(1+d²/900) —
+      // audible from ~60 m, before the temple is clearly seen
+      this._lotusHum -= dt;
+      if(this._lotusHum <= 0){
+        this._lotusHum = 9;
+        const lvl = 0.09/(1 + ld2/900);
+        if(lvl > 0.012) this.note(146.83, Math.max(lvl, 0.02), 8.5);   // D3
+      }
+      // approach toll: first entry into the 40 m radius, once a session
+      if(!this._lotusToll && ld2 < 1600){ this._lotusToll = true; this.note(146.83, 0.08, 6.0); }
+      // wind voice: the finial sings one faint high partial in strong air
+      if(ld2 < 3600 && gust > 0.9 && Math.random() < dt*0.4)
+        this.note(880, 0.015*clamp(1 - Math.sqrt(ld2)/60, 0, 1), 2.2); // A5
+    }
 
     // TRAIN — distance, air absorption, pan, doppler-ish
     if(state.trainActive){
@@ -11060,6 +11466,7 @@ const State = {
   invertY: qsBool('invertY', false),
   dprCap:  qsNum('dpr', HAS_TOUCH ? 2 : 0),       // 0 = the panel's native ratio; §M1: touch devices default-cap at 2 (13" iPad M5 native IS 2 → ≈18.4M samples at q=2, inside MAX_SAMPLES; guards any 3× panel)
   ipad:    qsBool('ipad', HAS_TOUCH),   // §B5 (B0b, ch 2.7) — the approved iPad M5 preset: HAS_TOUCH-gated msaa 2 · px 0.80 · shadow 2048 · grass gb ×0.7 · fpscap 60 (applied at the FID block below).  ?ipad=0 = the total escape (desktop config on glass); ?ipad=1 forces it on for a desktop A/B.
+  onb:     qsBool('onb', HAS_TOUCH),   // §M3 — FIRST STEPS onboarding (ipad handoff §10): the touch-only walk-before-fly lesson.  This flag is the SYSTEM gate; a natural run additionally needs PERSIST (bench URLs never see it) and no stored completion (localStorage hoshi_ob).  ?onb=0 = total escape (also lifts the fly lock) · ?onb=1 forces a run (the harness door / manual demo).
   treebin: qsBool('treebin', true),
   // defect fixes ride flags too, but default ON — ?bias=0 keeps the legacy
   // metre-scale shadow bias (and its 1..1500 light bracket) for A/B
@@ -11138,7 +11545,7 @@ const State = {
     perch:     qsBool('perch', true),      // W2-C3 treetop/ridge perch (slow crown-top touch = sit, not spin)
      trainride: qsBool('trainride', true),  // W2-B6 land on and ride the train roof
      crag:      qsBool('crag', true),       // W2-C6 lookout crag + slope gate (cliffs unwalkable)
-     lotus:     qsBool('lotus', false),     // §L1 palm-sized lotus+mondop shrine on a plinth by the spawn knoll; default-off (cragmesh convention)
+     lotus:     qsBool('lotus', true),      // §L1/§30 V8 — the floating lotus temple destination at (-63,145): collision+causeway+bell+bob+lantern+incense; DEFAULT ON by human order at the V8 checkpoint (2026-08-30, "be flagged on, now"); escape ?lotus=0
     lanterns:  qsBool('lanterns', false),  // W3-B2 village sky lanterns (festival at dusk)
     bugs:      qsBool('bugs', false),      // W3-B5 butterflies (day) + dragonflies (water margin)
     balloon:   qsBool('balloon', false),   // W4-B3 Montgolfier aerostat
@@ -11294,6 +11701,7 @@ let composite, brightMat, downMats=[], upMats=[], blurMats=[], windMat, windView
 const audio = new Audio();
 let walker, grass, train, smoke, motes, birdsP, cloudObj, skyMesh, waterMesh, terrainMesh;
 let snowP=null, leafP=null, rainP=null, streakP=null, seedP=null, petalP=null;   // delight particle systems (§T14c adds the dive streamers; §W5-E5 the seeds; §29.5-D3 the sakura petals)
+let rippleP=null, flyP=null;   // §30.5 V8-T4 — lotus ripple rings (kind 7) + fireflies (kind 3), pools exist only under ?lotus=1
 let trees=[], ridges=[], reflectSet=[];
 let treeSet=[];                  // §7.2b {kind, inst, meshes[3]} — re-binnable trees
 const TREE_FAR_R  = 2400;        // fogs out past here — the beauty VS retires the instance
@@ -11317,14 +11725,15 @@ let millWheel=null, villageSmokers=[], proxyTerrain=null, puffRT=null, routeFenc
 let SHRINE_POS=null, INN_OBB=null, INN_HEARTH=null;   // §W6-F2/F5 — set by buildVillage
 let cloudShRT=null, cloudShMat=null, lifeGroup=null;
 
-/*──────────────── §L1 — the palm-sized lotus shrine (?lotus=1) ────────────────
-   A 10×10×10 cm jewel sitting on a low plinth on the spawn knoll.  The outer
-   ring borrows the Delhi Lotus Temple's nine tall petals, rotated 20° so four
-   tips land on the cube's edge-midpoints and four tuck toward the corners —
-   exploiting the √2 diagonal headroom of the box.  Nestled in the flat core is
-   a square golden Thai mondop with a tiered spire roof and one grand wide-open
-   glowing entrance.  Gated default-off so ?lotus=0 (and any URL without the
-   flag) stays byte-identical; per the cragmesh convention.                  */
+/*──────────────── §L1/§30 — the floating lotus temple (?lotus=1) ───────────
+   A ~14 m stone lotus floating mid-river at (-63, 145): three tiers of nine
+   curved petal shells (the Delhi Lotus Temple's language), a golden Thai
+   mondop with a tiered spire nestled in its heart, one grand glowing
+   doorway facing spawn.  BATCH V8 made it a DESTINATION: walkable pads +
+   solids (§30.2), the lily-pad causeway (§30.3), bell + reeds (§30.4),
+   bob/sway/ripples/fireflies (§30.5), the Lantern Bloom (§30.6) and the
+   incense thermal + FIRSTS (§30.7).  Gated default-off (?lotus=0 and any
+   URL without the flag stay byte-identical; the cragmesh convention).     */
 function buildLotusShrine(){
   /* Everything flows through the painted toolkit (PB → finishPainted →
      PAINTED_VS/FS) so the miniature is lit by the SAME sun/sky/shadow as the
@@ -11335,10 +11744,12 @@ function buildLotusShrine(){
 
   /* ── placement (world units): a HOUSE-SIZED lotus floating on the pond, the
      golden mondop nestled inside.  Authored in sculpture-local units (roughly
-     "cm", but now scaled by S=0.55 so a ~16-unit bloom spans ≈ 9 m).  Base
+     "cm", scaled by S).  V8R verdict "could be bigger 20% to give more room
+     for walking": S 0.55 → 0.66 — drum, steps, cup and petals all grow from
+     this ONE number (L-2; pads/solids/thresh/spire derive below).  Base
      floats just at the water surface.                                        */
   const bx = -63.0, bz = 145.0;
-  const S = 0.55;
+  const S = 0.66;
   /* the pond: river pool at t≈0.41, waterY ≈ 19.9.  Float the sculpture's
      local y=0 plane exactly at the water surface so the cup kisses it.       */
   const rf = riverField(bx, bz);
@@ -11364,6 +11775,10 @@ function buildLotusShrine(){
      ambient (shade band mixes in K_SHADOW blue) and still reads as marble.   */
   const marble  = [1.00, 0.94, 0.84];
   const marbleHi= [1.00, 0.97, 0.90];
+  /* V8R — the PETALS leave the marble family: soft ivory silk (the verdict
+     hues; vanilla pooling is per-vertex in petalShell)                       */
+  const ivory   = [1.00, 0.965, 0.885];
+  const ivoryHi = [1.00, 0.985, 0.925];
   const gold    = LC('brass');
   const goldHi  = tint(LC('brass'), 1.15);
   const glow    = LC('windowGlow');
@@ -11383,22 +11798,37 @@ function buildLotusShrine(){
      lean    = how far the tip leans OUT (units, horizontal)
      width   = full width across the petal mid (units)
      curl    = lip curl-back (fold at the tip)
-     col     = marble colour at the BASE; tips blush toward rose (lotus!)
+     col     = petal BODY colour
+     o       = V8R options: droop (tip sag below the spring plane — the
+               waterline skirt), tip/van colour overrides, vanK/blushK
+               strength, mat (default 7 = petal silk, lotus program only)
      Normals point radially OUTWARD from the bloom axis (soft sphere-ish
-     shading), blended with a slight up-tilt, so petals glow like marble.
-     Per-vertex colours: cream at the base → soft rose at the tip, with a
-     lighter midrib — the signature white-lotus gradient.                   */
-  function petalShell(baseR, height, lean, width, curl, col){
-    const tipCol=[1.00,0.62,0.58];                       // lotus rose blush
+     shading), blended with a slight up-tilt, so petals glow like silk.
+     V8R verdict colours ("soft ivory hues with warm vanillia hues near
+     base of each petal · classic lotus, artistic painterly refinement"):
+     vanilla pools at the BASE and along the midrib, the body is ivory, and
+     only the tip fringe keeps the faintest classic blush; warmth and tone
+     drift petal-to-petal, deterministic in the azimuth (no rng, L-2).     */
+  function petalShell(baseR, height, lean, width, curl, col, o){
+    o = o || {};
+    const tipCol = o.tip || [1.00, 0.80, 0.76];
+    const vanCol = o.van || [1.00, 0.855, 0.55];
+    const vanK   = o.vanK   === undefined ? 1 : o.vanK;
+    const blushK = o.blushK === undefined ? 1 : o.blushK;
+    const droop  = o.droop || 0;
+    const matP   = o.mat === undefined ? 7 : o.mat;
     return (a)=>{
       const SEG=8, ACROSS=7;
       const dirX=Math.sin(a), dirZ=Math.cos(a);          // outward radial dir
       const tanX=Math.cos(a), tanZ=-Math.sin(a);          // tangential (width) dir
+      const vanP = vanK*(0.80 + 0.20*Math.sin(a*2.3 + 0.7));   // per-petal warmth drift
+      const tone = 1 + 0.035*Math.sin(a*5.1 + 2.2);            // per-petal tone drift
       const verts=[], norms=[], cols=[];
       for(let s=0;s<=SEG;s++){
         const t=s/SEG;                                    // 0 base → 1 tip
         /* spine: rises to `height`, leans out to `lean`; near the tip the curl
-           folds it back inward.  Pointed tip: rise eases to a peak.          */
+           folds it back inward.  Pointed tip: rise eases to a peak.  A skirt
+           petal DROOPS: the tip sags below the spring plane into the pond.  */
         const rise = height * Math.pow(Math.sin(t*Math.PI*0.5), 0.9);
         let out = lean * Math.pow(t, 1.3);                // accelerating lean
         let yy = rise;
@@ -11407,6 +11837,7 @@ function buildLotusShrine(){
           out -= Math.sin(ct*curl)*lean*0.45;
           yy  += (1-Math.cos(ct*curl))*height*0.05;
         }
+        yy -= droop*t*t;
         /* width profile: swells from the base, broadest ~55% up, tapering to a
            POINT at the tip (lotus petals are pointed, not rounded).          */
         const wProf = width * 0.5 * Math.pow(Math.sin(Math.PI * Math.pow(t,0.85)), 0.85);
@@ -11434,15 +11865,16 @@ function buildLotusShrine(){
           ny += -Math.abs(u)*0.25;
           const nl=Math.hypot(nx,ny,nz)||1;
           nrow.push([nx/nl, ny/nl, nz/nl]);
-          /* colour: base → rose blush concentrated near the tip; midrib and
-             extreme edges stay paler (like a real lotus petal).  Blush is
-             strong so it survives dusk ambient flattening.                 */
-          const blush = Math.pow(t, 1.3) * (0.30 + 0.70*Math.abs(u));
-          const lit = 1.0 + (1-Math.abs(u))*0.05;
-          crow.push([
-            Math.min(1,(col[0]+(tipCol[0]-col[0])*blush)*lit),
-            Math.min(1,(col[1]+(tipCol[1]-col[1])*blush)*lit),
-            Math.min(1,(col[2]+(tipCol[2]-col[2])*blush)*lit)]);
+          /* V8R colour: vanilla at the base flowing up the midrib → ivory
+             body → the faintest rose kiss on the tip fringe only.          */
+          const van   = Math.pow(1-t, 1.35) * (0.45 + 0.55*(1-Math.abs(u))) * vanP;
+          const blush = Math.pow(t, 2.4) * (0.15 + 0.55*Math.abs(u)) * 0.45 * blushK;
+          const lit = (1.0 + (1-Math.abs(u))*0.05) * tone;
+          let cr = col[0] + (vanCol[0]-col[0])*van;
+          let cg = col[1] + (vanCol[1]-col[1])*van;
+          let cb = col[2] + (vanCol[2]-col[2])*van;
+          cr += (tipCol[0]-cr)*blush; cg += (tipCol[1]-cg)*blush; cb += (tipCol[2]-cb)*blush;
+          crow.push([ Math.min(1,cr*lit), Math.min(1,cg*lit), Math.min(1,cb*lit) ]);
         }
         verts.push(row); norms.push(nrow); cols.push(crow);
       }
@@ -11451,7 +11883,7 @@ function buildLotusShrine(){
           quadSmooth(
             verts[s][k],  verts[s][k+1],  verts[s+1][k+1],  verts[s+1][k],
             norms[s][k],  norms[s][k+1],  norms[s+1][k+1],  norms[s+1][k],
-            cols[s][k],   cols[s][k+1],   cols[s+1][k+1],   cols[s+1][k], 0);
+            cols[s][k],   cols[s][k+1],   cols[s+1][k+1],   cols[s+1][k], matP);
         }
       }
     };
@@ -11472,16 +11904,19 @@ function buildLotusShrine(){
      its seed-pod.  Broad shallow scoops lying nearly flat; a door-facing gap
      in the inner ring shows the glow.                                      */
   const tiers=[
-    { n:9, rot:rotCube, baseR:4.6, height:4.4, lean:6.6, width:4.6, curl:0.5, col:marble   },  // outer: broad, flung nearly flat
-    { n:9, rot:0,       baseR:3.7, height:3.7, lean:4.8, width:4.2, curl:0.7, col:marbleHi },  // mid: fills the outer gaps
-    { n:9, rot:rotCube, baseR:2.8, height:3.0, lean:3.3, width:3.7, curl:0.9, col:marble   },  // inner: a low collar around the temple
+    { n:9, rot:rotCube, baseR:4.6, height:4.4, lean:6.6, width:4.6, curl:0.5, col:ivory   },  // outer: broad, flung nearly flat
+    { n:9, rot:0,       baseR:3.7, height:3.7, lean:4.8, width:4.2, curl:0.7, col:ivoryHi },  // mid: fills the outer gaps
+    { n:9, rot:rotCube, baseR:2.8, height:3.0, lean:3.3, width:3.7, curl:0.9, col:ivory   },  // inner: a low collar around the temple
   ];
   for(const tr of tiers){
     for(let i=0;i<tr.n;i++){
       const a=(i/tr.n)*TAU + tr.rot;
-      /* leave a gap in the INNER ring nearest the door azimuth (+Z local, a=0)
-         so the glowing doorway is visible from outside the bloom.           */
-      if(tr===tiers[2]){
+      /* leave a gap nearest the door azimuth (+Z local, a=0) — INNER ring so
+         the glowing doorway is visible (V8), and V8R2 also the MID ring: its
+         i=0 petal stood dead at the bridge end ("consider removing the petal
+         at the end of the bridge to make access to lotus obvious, inviting").
+         The outer tier is rotated ±20° off-axis and FRAMES the walk-in.     */
+      if(tr!==tiers[0]){
         let dd=Math.abs(((a+Math.PI)%TAU)-Math.PI);   // angular dist from a=0
         if(dd < TAU/tr.n*0.55) continue;              // skip the door-facing petal
       }
@@ -11489,54 +11924,369 @@ function buildLotusShrine(){
     }
   }
 
-  /* ── floating base: a broad low drum the whole bloom sits on, kissing the
-     water.  A wide flat disk so the lotus reads as resting ON the pond, plus
-     a darker wet rim just at the waterline for grounding.                    */
-  PCYL([0,-0.5,0],[0,0.55,0], 5.2, 4.6, 22, marble, 0, true, true);      // floating base drum
-  PCYL([0,-0.55,0],[0,-0.30,0], 5.4, 5.2, 22, [0.45,0.42,0.36], 0, true, true); // wet waterline rim
+  /*── §30.5 V8R → §31.V8R2D — the waterline SKIRT is REMOVED by checkpoint
+     order ("Just remove them" — the human-sanctioned fallback after the
+     collar rework still read wrong).  The floating pass is carried by the
+     wet 3-band hull, the coupled ripple rings and the water's contact
+     shading alone.  skirtReach survives as the HULL's waterline radius
+     (soaked-hull top r 4.97, ×S — L-2: derived, not re-typed): it feeds
+     uLotusHull, so the contact-darkening pool now hugs the drum.          */
+  const skirtReach = 4.97*S;
+
+  /* ── floating base: a broad low drum the whole bloom sits on, sitting IN
+     the water, not on it (V8R "hovering" verdict).  Three bands straddle the
+     waterline: soaked hull below, a damp meniscus band exactly where the bob
+     swell reaches (±0.07 m world = ±0.11 local), dry marble only above it.  */
+  PCYL([0,-0.55,0],[0, 0.12,0], 5.30, 4.97, 22, [0.42,0.43,0.36], 0, true, false); // soaked hull, in the pond
+  PCYL([0, 0.12,0],[0, 0.34,0], 4.97, 4.86, 22, [0.74,0.72,0.62], 0, false, false);// damp meniscus band (the swell's reach)
+  PCYL([0, 0.34,0],[0, 0.55,0], 4.86, 4.60, 22, marble, 0, false, true);           // dry marble, above the swell
 
   /* ── the mondop temple (square plan) on the cup, door facing +Z(local).
      HOUSE scale and PROUD: ~2.9 m footprint, doorway ~2.4 m tall, finial at
      ~5 m — rising well clear of the low petal collar so the temple reads as
-     the luminous heart of the open bloom.                                  */
-  /* stepped square base */
+     the luminous heart of the open bloom.
+     §31.V8R2D T3 ("nope, look at other lantern, learn, improve. Simplify."):
+     rebuilt in the language of the game's OWN stone tōrō (the village/summit
+     5-part recipe: stone base → shaft → CONTAINED light-box → wide square-set
+     cap → jewel).  Changes from V8R2: the gold family and its six sills/
+     lintels are GONE (stone carries the form; the ONE gold accent left is
+     the finial = the tōrō jewel), the whole-wall panes shrink to framed
+     embers stopped by a deep stone spandrel brow (ONE clear glow per face —
+     the tōrō firebox), and the cap slabs lose the k*0.5 pinwheel rotation
+     (a tōrō cap is square-set).  Stone = the bridge's own granite on mat 8
+     (the T1 steady-stone path): bridge and lantern are one carved family.
+     Everything the COLLISION/pads/ROOFS read is untouched: base slab sizes,
+     the ±1.85 pillar planes, the wall planes, the roof-slab y/w ladder (the
+     third top face stays local 7.8 = the roof perch), the spire tip 9.4.   */
+  const granL   = [0.400, 0.386, 0.362];   // the bridge's gran/granHi literals
+  const granLHi = [0.460, 0.445, 0.415];
+  /* stepped square base — stone, not gold (the walkable stair pads below
+     mirror these exact sizes; only the dress changed) */
   for(let k=0;k<3;k++){
     const w = 5.2 - k*0.85;
-    PBOX(0, 2.0 + k*0.5, 0, w/2, 0.25, w/2, 0, k===0?stone:gold, k===0?0:1);
+    PBOX(0, 2.0 + k*0.5, 0, w/2, 0.25, w/2, 0, k===1?granLHi:granL, 8);
   }
-  /* corner columns; +Z front left OPEN (the grand entrance) */
+  /* corner columns — the shaft stage; +Z front pair frames the entrance */
   for(const [cx,cz] of [[-1.85,-1.85],[1.85,-1.85],[-1.85,1.85],[1.85,1.85]]){
-    PBOX(cx, 4.5, cz, 0.38, 1.6, 0.38, 0, goldHi, 1);
+    PBOX(cx, 4.5, cz, 0.38, 1.6, 0.38, 0, granLHi, 8);
   }
-  /* back + side walls, no front wall */
-  PBOX(0, 4.5, -1.9, 2.1, 1.6, 0.22, 0, gold, 1);
-  PBOX(-1.9, 4.5, 0, 0.22, 1.6, 1.68, 0, gold, 1);
-  PBOX( 1.9, 4.5, 0, 0.22, 1.6, 1.68, 0, gold, 1);
+  /* the light-box: ONE contained pane per closed face, sill tucked under the
+     glowing floor line, a stone spandrel brow above (the tōrō firebox read).
+     Collision keeps the old wall planes: the light still stops the walker
+     (the 'lotusIn' law — the solids below are untouched).                  */
+  PBOX(0, 4.28, -1.78, 1.47, 0.90, 0.06, 0, glow, 2);   // back pane
+  PBOX(-1.78, 4.28, 0, 0.06, 0.90, 1.47, 0, glow, 2);   // left pane
+  PBOX( 1.78, 4.28, 0, 0.06, 0.90, 1.47, 0, glow, 2);   // right pane
+  PBOX(0, 5.62, -1.84, 1.60, 0.44, 0.10, 0, granL, 8);  // back spandrel brow
+  PBOX(-1.84, 5.62, 0, 0.10, 0.44, 1.60, 0, granL, 8);  // left spandrel
+  PBOX( 1.84, 5.62, 0, 0.10, 0.44, 1.60, 0, granL, 8);  // right spandrel
+  PBOX(0, 5.62, 1.84, 1.60, 0.44, 0.10, 0, granL, 8);   // door-face spandrel
   /* glowing interior floor + a seated figure as the glow's source */
   PBOX(0, 3.4, 0, 1.66, 0.12, 1.66, 0, glow, 2);
   PCYL([0,3.6,0],[0,4.9,0], 0.78, 0.18, 8, glow, 2, true, true);   // seated cone
   /* the open doorway itself emits warm light so it reads even in shadow */
-  PBOX(0, 4.5, 1.86, 1.5, 1.5, 0.05, 0, glow, 2);
-  /* tiered spire roof: three shrinking rotated slabs + a finial */
+  PBOX(0, 4.19, 1.86, 1.05, 0.99, 0.05, 0, glow, 2);
+  PBOX(-1.26, 4.19, 1.85, 0.21, 0.99, 0.08, 0, granLHi, 8);  // door jambs: stone
+  PBOX( 1.26, 4.19, 1.85, 0.21, 0.99, 0.08, 0, granLHi, 8);  // closes the slit to the pillars
+  /* the cap: three square-set shrinking stone slabs (same y/w ladder — the
+     third's top face IS the roof perch, local 7.8) + the one gold accent  */
   for(let k=0;k<3;k++){
     const w = 5.0 - k*1.05;
-    PBOX(0, 6.3 + k*0.62, 0, w/2, 0.26, w/2, k*0.5, k===2?gold:goldHi, 1);
+    PBOX(0, 6.3 + k*0.62, 0, w/2, 0.26, w/2, 0, k===1?granLHi:granL, 8);
   }
-  PCYL([0,8.0,0],[0,9.4,0], 0.5, 0.04, 4, goldHi, 1, true, true); // finial spire
+  PCYL([0,7.80,0],[0,9.4,0], 0.46, 0.04, 4, goldHi, 1, true, true); // finial spire (the tōrō jewel; tip 9.4 = the straddle perch)
 
   /* centre cup: a shallow drum the shrine sits on, raised just above water. */
   PCYL([0,0,0],[0,1.9,0], 2.8, 2.4, 18, marble, 0, true, false);
 
+  /*── §30.2 V8-T1 — the place, in the player's hands ──────────────────────
+     Collision + walkable surfaces, registered from the SAME local numbers as
+     the geometry above (the §W2 "collision can never drift" rule), through
+     the same LW/S/yaw transform.  Solids follow the teahouse pattern (walls
+     block, the doorway stays open); walkable tops join lotusTopAt's pad list
+     (the deck idiom) — solids alone cannot carry a walker.
+     The mondop's shrine room is ~1.45 m tall (floor local 3.46 → wall top
+     6.1, ×S) — a shrine, not a hall: no walker fits inside, so ONE interior
+     block keeps heads out of the roof slabs and the invisible boundary sits
+     just BEHIND the glowing door plate — you are stopped by the light
+     itself, standing on the steps in the glow (the 'lotusIn' moment).      */
+  const SOLID_TOP = floatY + 6.1*S;              // walls + columns top (local 6.1)
+  const lotusSolid = (cx, cz, hx, hz, top)=>{
+    const [wx,,wz] = LW(cx, 0, cz);
+    pushSolid(wx, wz, hx*S, hz*S, yaw, top);
+    return { s: SOLIDS[SOLIDS.length-1], base: top };
+  };
+  const lSolids = [];
+  lSolids.push(lotusSolid(0, -1.9, 2.1, 0.22, SOLID_TOP));        // back wall
+  lSolids.push(lotusSolid(-1.9, 0, 0.22, 1.68, SOLID_TOP));       // left wall
+  lSolids.push(lotusSolid( 1.9, 0, 0.22, 1.68, SOLID_TOP));       // right wall
+  lSolids.push(lotusSolid(-1.85, 1.85, 0.38, 0.38, SOLID_TOP));   // front column L
+  lSolids.push(lotusSolid( 1.85, 1.85, 0.38, 0.38, SOLID_TOP));   // front column R
+  lSolids.push(lotusSolid(0, 0, 1.66, 1.66, SOLID_TOP));          // shrine room block (figure + glow floor live inside)
+  /* spire ridge joins the perch-surface family — the straddle-perch code
+     (§W2-C3 roofRidgeAt) reuses with zero changes.  Top = the third roof
+     slab's upper face (local 7.54 + 0.26).                                  */
+  ROOFS.push({ x:bx, z:bz, ca, sa, hl:2.0*S, top: floatY + 7.8*S });
+  const lRoof = { r: ROOFS[ROOFS.length-1], base: floatY + 7.8*S };
+  /* walkable pads: drum → cup → mondop steps (the stair the groundY ease
+     turns into a climb) + FOUR outer-petal perch pads.  Petal pad height =
+     the petalShell spine evaluated ONCE here at t≈0.7, u=0, from the SAME
+     tier constants the geometry used (§30.2: freeze the number at build).  */
+  const pads = [];
+  const padDisc = (cx, cz, r, top)=>{ const [wx,,wz]=LW(cx,0,cz); pads.push({ x:wx, z:wz, r, top }); };
+  const padBox  = (cx, cz, hx, hz, top)=>{ const [wx,,wz]=LW(cx,0,cz); pads.push({ x:wx, z:wz, hx:hx*S, hz:hz*S, top }); };
+  padDisc(0, 0, 5.00*S, floatY + 0.55*S);                  // base drum top (r derives from S — V8R)
+  padDisc(0, 0, 2.45*S, floatY + 1.9*S);                   // centre cup top
+  for(let k=0;k<3;k++){                                    // stepped base tops
+    const w = 5.2 - k*0.85;
+    padBox(0, 0, w/2, w/2, floatY + (2.25 + k*0.5)*S);
+  }
+  {
+    const t7 = 0.7, tr0 = tiers[0];
+    const rise7 = tr0.height * Math.pow(Math.sin(t7*Math.PI*0.5), 0.9);
+    const ct7 = (t7-0.55)/0.45;
+    const out7 = tr0.lean * Math.pow(t7, 1.3) - Math.sin(ct7*tr0.curl)*tr0.lean*0.45;
+    const yy7 = rise7 + (1-Math.cos(ct7*tr0.curl))*tr0.height*0.05;
+    const wProf7 = tr0.width*0.5*Math.pow(Math.sin(Math.PI*Math.pow(t7,0.85)),0.85);
+    const padR = tr0.baseR + out7 + wProf7*0.22;           // u=0 midrib radius
+    for(const ai of [0,2,4,6]){                            // outer petals nearest the cardinals (az 20/100/180/260, "cardinal-ish + doorYaw")
+      const a = (ai/tr0.n)*TAU + tr0.rot;
+      padDisc(Math.sin(a)*padR, Math.cos(a)*padR, 2.09*S, floatY + yy7*S);
+    }
+  }
+  /* the 'stepped inside the light' threshold zone (yaw-local OBB, on foot) */
+  const thWorld = LW(0, 0, 2.55);
+  /* V8R — the pads broad-phase derives from the pads themselves (the old
+     hand-tuned 46 clipped the petal pads once S grew): max centre-distance +
+     pad radius + 0.8 m slack, squared once here.  V8R2 keeps the raw edge
+     as rimR — the bloom rail's line ("too easy to fall off lotus").         */
+  const bloomREdge = (()=>{ let m = 0;
+    for(const p of pads){ const d = Math.hypot(p.x-bx, p.z-bz) + (p.r !== undefined ? p.r : Math.hypot(p.hx, p.hz)); if(d > m) m = d; }
+    return m; })();
+  const bloomRR = (bloomREdge + 0.8)*(bloomREdge + 0.8);
+  LOTUS = { x:bx, z:bz, floatY, yaw, ca, sa,
+            bob:{ dy:0, rx:0, rz:0 }, pads, solids:lSolids, roof:lRoof,
+            bloomRR, rimR:bloomREdge, drumR:4.6*S, skirtR:skirtReach,
+            cwB:null, cwC:{ x:bx, z:bz, rr:1 }, cw0:null,
+            thresh:{ x:thWorld[0], z:thWorld[2], hx:1.5*S, hz:0.85*S },
+            spire:(()=>{ const p=LW(0,9.4,0); return { x:p[0], y:p[1], z:p[2] }; })(),
+            mesh:null, padsMesh:null };
+
+  /*── §30.3 V8R — the stone bridge: the walk across the water ──────────────
+     The V8 checkpoint retired the lily pads ("too easy to fall off … a
+     lovely arched bridge from a single stone like elegant bridges in
+     japanese parks").  ONE low granite arc now springs from the door-side
+     shore to the drum: survey the shore with riverField exactly as before,
+     then sweep a carved cross-section (deck + raised curb lips + chamfered
+     belly) along a sine arc — every number deterministic, no rng (L-2).
+     The stone is its own STATIC mesh (the bloom bobs alone, §30.5);
+     walkability is ONE analytic deck in lotusTopAt (cwB — the viaduct's
+     deck idiom, not per-pad discs), so falling off now takes a deliberate
+     hop over the curbs.  The old pads survive as pure DECORATION: a scatter
+     of lily leaves + two closed buds floating clear of the bridge line —
+     water furniture, no collision (the §W2-C6 marker-is-not-an-obstacle
+     ruling).  No swim exists and none is built: falling in still walks the
+     riverbed (§30.3), and the shore is never far.                          */
+  const M2 = PB();
+  {
+    const dirX = Math.sin(yaw), dirZ = Math.cos(yaw);   // door axis, toward spawn
+    const latX = -dirZ, latZ = dirX;                    // lateral (left of the walk-out)
+    let shoreS = 0;
+    for(let s=4; s<44; s+=0.5){
+      const px = bx + dirX*s, pz = bz + dirZ*s;
+      const rf2 = riverField(px, pz);
+      if(rf2.d >= riverWidth(rf2.t) - 1){ shoreS = s; break; }
+    }
+    if(!shoreS) shoreS = 18;
+    /* spring points: the bloom end lands ON the drum top (and tucks 0.25 m
+       into the hull so the seam never shows); the shore end beds into the
+       bank just past the water's edge, planted, never stilted (L-8).       */
+    const bS0 = 4.6*S - 0.25, bS1 = shoreS + 0.9, span = bS1 - bS0;
+    const yA  = floatY + 0.55*S;
+    const eX  = bx + dirX*(bS1 + 0.4), eZ = bz + dirZ*(bS1 + 0.4);
+    const wlE = waterLevel(riverField(eX, eZ).t);
+    const yB  = Math.max(sampleHeight(eX, eZ) + 0.10, wlE + 0.16);
+    const rise = Math.min(1.30, Math.max(0.90, span*0.095));
+    /* the carved section: walk deck 1.40 m between 0.28 m curb lips, hull
+       chamfering to a narrower belly — one stone, read from every angle.
+       v8r2: DEEPER hull (0.85 m at the springs, 0.55 at the crown) + true
+       granite greys — the first cut read as a pale ribbon, not stone.
+       v8r3: greys sunk another ~12% — under noon sky the deck top still
+       bleached near-white from above (ring/hero witnesses).
+       V8R2: the whole arc is mat 8 — carved stone with NO mineral speckle
+       and NO band jitter: the deck must read dead-steady while walked
+       ("patterns on bridge are moving ... should be stationairy").         */
+    const hw = 1.02, iw = 0.70, bw = 0.80;
+    const NSEG = 18, EXT = 1.3;                         // arc segments + flat buried landing
+    const gran   = [0.400, 0.386, 0.362];
+    const granHi = [0.460, 0.445, 0.415];
+    const granWet= [0.290, 0.285, 0.264];
+    /* stations along the walk: the sine arc, then a landing bedded INTO the
+       rising bank (planted, never stilted — L-8)                           */
+    const st = [];
+    for(let i=0;i<=NSEG;i++){
+      const t = i/NSEG, s = bS0 + span*t;
+      st.push({ s, t, y: yA + (yB-yA)*t + rise*Math.sin(Math.PI*t),
+                thick: 0.85 - 0.30*Math.sin(Math.PI*t) });
+    }
+    st.push({ s: bS1 + EXT*0.5, t: 1, y: yB - 0.05, thick: 0.85 });
+    st.push({ s: bS1 + EXT,     t: 1, y: yB - 0.22, thick: 0.85 });
+    for(let i=0;i<st.length;i++)
+      st[i].slope = i===0 ? (st[1].y-st[0].y)/(st[1].s-st[0].s)
+        : i===st.length-1 ? (st[i].y-st[i-1].y)/(st[i].s-st[i-1].s)
+        : (st[i+1].y-st[i-1].y)/(st[i+1].s-st[i-1].s);
+    const P3 = (i, o, h)=>{ const a = st[i];
+      return [ bx + dirX*a.s + latX*o, a.y + h, bz + dirZ*a.s + latZ*o ]; };
+    /* wet stone near the waterline, painterly tone drift along the span */
+    const bcol = (i, o, h, c)=>{
+      const y = st[i].y + h;
+      const wet = Math.min(1, Math.max(0, (floatY + 0.45 - y)/0.60));
+      const tone = 1 + 0.045*Math.sin(i*2.71 + 0.9) + 0.02*Math.sin(o*3.3 + i);
+      return [ Math.min(1,(c[0]+(granWet[0]-c[0])*wet)*tone),
+               Math.min(1,(c[1]+(granWet[1]-c[1])*wet)*tone),
+               Math.min(1,(c[2]+(granWet[2]-c[2])*wet)*tone) ];
+    };
+    /* sweep one strip: lateral offsets o0→o1 at heights h0/h1 (rel deck),
+       shared per-station normals so the arc shades smooth, never faceted  */
+    const strip = (o0, h0, o1, h1, nrm, col)=>{
+      let prev = null;
+      for(let i=0;i<st.length;i++){
+        const n = nrm(i);
+        const va = P3(i, o0, typeof h0==='function' ? h0(i) : h0);
+        const vb = P3(i, o1, typeof h1==='function' ? h1(i) : h1);
+        const ia = pv(M2, va[0],va[1],va[2], n[0],n[1],n[2], bcol(i,o0,typeof h0==='function'?h0(i):h0,col), 8);
+        const ib = pv(M2, vb[0],vb[1],vb[2], n[0],n[1],n[2], bcol(i,o1,typeof h1==='function'?h1(i):h1,col), 8);
+        if(prev) pq(M2, prev[0], prev[1], ib, ia);
+        prev = [ia, ib];
+      }
+    };
+    const nUp   = (i)=>{ const s2 = st[i].slope; const l = Math.hypot(s2,1);
+      return [ -s2*dirX/l, 1/l, -s2*dirZ/l ]; };
+    const nDown = (i)=>{ const n = nUp(i); return [ -n[0], -n[1], -n[2] ]; };
+    const nSide = (sgn)=>()=>{ const l = Math.hypot(1, 0.28);
+      return [ sgn*latX/l, -0.28/l, sgn*latZ/l ]; };
+    const nBevel= (sgn)=>()=>{ const l = Math.hypot(0.8, 0.6);
+      return [ sgn*latX*0.8/l, 0.6/l, sgn*latZ*0.8/l ]; };
+    const nFace = (sgn)=>()=>{ const l = Math.hypot(0.85, 0.4);
+      return [ sgn*latX*0.85/l, 0.4/l, sgn*latZ*0.85/l ]; };
+    const mT = (i)=> -st[i].thick;
+    for(const sg of [-1, 1]){
+      strip(sg*bw, mT, sg*hw, 0.055, nSide(sg), gran);              // hull side
+      strip(sg*hw, 0.055, sg*(hw-0.09), 0.115, nBevel(sg), granHi); // curb outer bevel
+      strip(sg*(hw-0.09), 0.115, sg*(iw+0.06), 0.105, nUp, granHi); // curb top
+      strip(sg*(iw+0.06), 0.105, sg*iw, 0.005, nFace(-sg), gran);   // curb inner face
+      strip(sg*iw, 0.005, 0, 0.035, nUp, gran);                     // deck half (crowned)
+    }
+    strip(bw, mT, -bw, mT, nDown, gran);                            // belly
+    {  /* shore end wall (the bank may dip below the buried landing) */
+      const i = st.length-1, n = [dirX, 0, dirZ];
+      const q = [ P3(i,-bw,mT(i)), P3(i,bw,mT(i)), P3(i,hw,0.055), P3(i,-hw,0.055) ];
+      const ix = q.map(p2=>pv(M2, p2[0],p2[1],p2[2], n[0],n[1],n[2], bcol(i,0,-0.2,gran), 8));
+      pq(M2, ix[0], ix[1], ix[2], ix[3]);
+    }
+    /*── the lotus garden: decorative lily leaves + two closed buds, kept
+        clear of the bridge corridor (deterministic index-trig, no rng).
+        V8R2: "darker richer greedn with classic upturned edges" — deep waxy
+        greens + an outward-flaring lip ring on every leaf (the classic
+        nelumbo bowl edge); the frog that jumps in stays BACKLOG.           ───*/
+    const leaf   = [0.100, 0.235, 0.085];
+    const leafHi = [0.135, 0.290, 0.110];
+    const rimA   = [0.082, 0.193, 0.068];
+    const rimB   = [0.111, 0.238, 0.090];
+    for(let i=0;i<8;i++){
+      const az = i*2.62 + 0.8;
+      /* §31.V8R2D T4 — sizes first (the radius feeds the orbit): rP 0.4–1.4
+         ("different sizes", was 0.55–1.05), and every pad orbits outside the
+         bloom's water footprint.  Checkpoint: "pads read right" — the orbit
+         is FROZEN at the accepted base 6.17 (it derived from the skirt's
+         reach; the skirt was removed by the same checkpoint, and accepted
+         geometry does not follow a dead constant downward).                */
+      const rP  = 0.40 + 1.00*(0.5 + 0.5*Math.sin(i*5.13 + 2.9));
+      const rr  = 6.17 + rP + 0.35 + 1.15*(0.5 + 0.5*Math.sin(i*3.13 + 1.1));
+      let px = bx + Math.sin(az)*rr, pz = bz + Math.cos(az)*rr;
+      const sB  = (px-bx)*dirX + (pz-bz)*dirZ;          // shove out of the bridge line
+      const latB= (px-bx)*latX + (pz-bz)*latZ;
+      if(sB > bS0-1 && sB < bS1+EXT+1 && Math.abs(latB) < hw+1.3){
+        const push = (hw+1.3-Math.abs(latB)+1.2)*(latB<0?-1:1);
+        px += latX*push; pz += latZ*push;
+      }
+      const rfP = riverField(px, pz);
+      if(rfP.d >= riverWidth(rfP.t) - 0.8) continue;    // stay on open water
+      const wlP = waterLevel(rfP.t);
+      const top = wlP + 0.080 + 0.040*(0.5 + 0.5*Math.sin(i*1.94 + 4.1));
+      /* §31.V8R2D T4 — "smoother circle · float on the water, not let water
+         fill in the middle": seg 12→20 on wall and lip, and the interior is
+         no longer a flat dark disc sunk inside the lip ring (the pool read):
+         a raised CROWN — a 20-tri dome fan, centre +0.07, leafHi — sheds
+         water at every angle and shades radially like a waxy leaf.         */
+      pcyl(M2, [px, wlP-0.10, pz], [px, top, pz], rP*0.90, rP, 20, i%2 ? leafHi : leaf, 8, false, false);
+      pcyl(M2, [px, top, pz], [px, top+0.110, pz], rP, rP*1.07, 20, i%2 ? rimB : rimA, 8, false, false);  // the upturned lip (mat 8: waxy OPAQUE leaf — the silk mat's warm mixes + translucency washed dark greens to pale mint)
+      {
+        const hiC = i%2 ? leafHi : leaf;
+        const ci = pv(M2, px, top+0.07, pz, 0, 1, 0, hiC, 8);
+        const ring = [];
+        for(let k=0;k<20;k++){
+          const a2 = k/20*TAU, sx = Math.sin(a2), sz = Math.cos(a2);
+          const nl = Math.hypot(0.42, 0.91);
+          ring.push(pv(M2, px+sx*rP, top, pz+sz*rP, sx*0.42/nl, 0.91/nl, sz*0.42/nl, hiC, 8));
+        }
+        for(let k=0;k<20;k++) pt3(M2, ci, ring[k], ring[(k+1)%20]);
+      }
+      if(i===2 || i===5){                               // a closed bud rides two of the leaves
+        const bxp = px + Math.sin(az*1.7)*rP*0.35, bzp = pz + Math.cos(az*1.7)*rP*0.35;
+        pcyl(M2, [bxp, top+0.05, bzp], [bxp, top+0.27, bzp], 0.145, 0.075, 8, [1.00,0.96,0.88], 7, false, false);
+        pcyl(M2, [bxp, top+0.27, bzp], [bxp, top+0.45, bzp], 0.075, 0.012, 8, [0.99,0.80,0.78], 7, false, true);
+      }
+      if(i===1 || i===6 || i===7){
+        /* §31.V8R2D T4 — "maybe a small flower in the middle of big pads":
+           the bud recipe OPENED, on the three largest (rP 1.39/1.21/1.36) —
+           a flaring ivory corolla cup + a warm seed-pod heart, mat 7 silk,
+           ~0.33 m across, planted on the crown's tip.                      */
+        const cy = top + 0.07;
+        pcyl(M2, [px, cy, pz], [px, cy+0.11, pz], 0.055, 0.165, 8, [1.00,0.97,0.90], 7, true, false);
+        pcyl(M2, [px, cy+0.02, pz], [px, cy+0.09, pz], 0.048, 0.030, 8, [1.00,0.84,0.52], 7, false, true);
+      }
+    }
+    /* the walkable record + the hint anchor (shore landing) */
+    LOTUS.cwB = { dirX, dirZ, s0:bS0, s1:bS1, s1w:bS1+EXT, span,
+                  hw:0.98, iwc:0.68, yA, yB, rise };
+    LOTUS.cw0 = { x: bx + dirX*(bS1+0.5), z: bz + dirZ*(bS1+0.5) };
+    const mid = (bS0 + bS1 + EXT)/2;
+    LOTUS.cwC = { x: bx + dirX*mid, z: bz + dirZ*mid, rr: Math.pow((bS1+EXT-bS0)/2 + 3.5, 2) };
+  }
+  const gPads = finishPainted(M2);
+  /* static water furniture: NO sway VS (a stone arc must never lean with the
+     wind — the V8 pads rode PAINTED_VS(true) only because their tops sat at
+     the float plane where the sway term is zero anyway).                    */
+  LOTUS.padsMesh = new THREE.Mesh(gPads,
+    RSM(PAINTED_VS(), PAINTED_FS(true), U({ uLotusSway: LOTUS_SWAY_U }), {side:THREE.DoubleSide}));
+  LOTUS.padsMesh.frustumCulled = true; LOTUS.padsMesh.renderOrder = 2;
+  LOTUS.padsMesh.userData.depth = DSM(PAINTED_VS(), U(), {side:THREE.DoubleSide});
+
   const g = finishPainted(M);
+  /*  §30.5 V8-T4 — pivot at the float-plane centre: geometry was authored in
+      world coords, so translate it to local and restore via mesh.position —
+      bob/roll then rotate the bloom about its own waterline, and the render
+      transform + the collision tops share ONE lotusBob() source (§W2).      */
+  g.translate(-bx, -floatY, -bz);
   const mesh = new THREE.Mesh(g, paintedLotusMat());
+  mesh.position.set(bx, floatY, bz);
   mesh.frustumCulled = true; mesh.renderOrder = 2;
-  mesh.userData.depth = DSM(PAINTED_VS(), U(), {side:THREE.DoubleSide});
+  mesh.userData.depth = DSM(PAINTED_VS(true), U({ uLotusSway: LOTUS_SWAY_U }), {side:THREE.DoubleSide});
+  LOTUS_SWAY_U.value.set(0, 0, floatY, 0);   // §30.5 — .z = the float plane; .xy driven per-frame
+  LOTUS.mesh = mesh;
   return mesh;
 }
 /*  §L1 — own material instance so the renderOrder/depth wiring matches the
-    village mesh exactly, but nothing else shares it.                        */
+    village mesh exactly, but nothing else shares it.  V8: the lotus carries
+    its OWN shader variant (PAINTED_VS/FS(true) — sway + lantern injections,
+    the DRIFT_FS template pattern), so every other painted mesh keeps the
+    stock program untouched.  ONE shared sway uniform object feeds the beauty
+    material, the pads material and both depth materials — one write moves
+    them all (§W2: render and shadow can never drift).                      */
+const LOTUS_SWAY_U = { value: new THREE.Vector4(0, 0, 0, 0) };
 function paintedLotusMat(){
-  return RSM(PAINTED_VS(), PAINTED_FS(), U(), {side:THREE.DoubleSide});
+  return RSM(PAINTED_VS(true), PAINTED_FS(true), U({ uLotusSway: LOTUS_SWAY_U }), {side:THREE.DoubleSide});
 }
 
 /*──────── the whole build ────────*/
@@ -11792,6 +12542,8 @@ async function boot(){
     RSM(WATER_VS(), WATER_FS(), U({
       uReflect:{value:null}, uReflectOn:{value:0}, uReflectPlane:{value:BR.water},
       uPiers:{value:piers}, uPierN:{value:pierN},
+      uLotusGlow:{value:new THREE.Vector4(0,0,0,0)},   // §30.6 V8-T5 — strength 0 = pass-through; set only under ?lotus=1
+      uLotusHull:{value:new THREE.Vector4(0,0,0,0)},   // §30.6 V8R — contact shading; strength 0 = pass-through
     }), {side:THREE.DoubleSide}));
   waterMesh.frustumCulled=false; waterMesh.renderOrder=3; waterMesh.userData.noCast=true;
   scene.add(waterMesh);
@@ -12128,6 +12880,10 @@ async function boot(){
   rainP  = new Particles(lifeGroup, U(), State.rain2?800:420,  DRIFT_FS(), 19, true);   // §W1-A3c density
   streakP= new Particles(lifeGroup, U(), 60,   MOTE_FS(),  24, false);   // §T14c dive streamers
   if(State.cragrocky) petalP = new Particles(lifeGroup, U(), 200, DRIFT_FS(), 19, true);   // §29.5-D3 — the sakura petal stream (pool 200, kind 6)
+  if(State.lotus){   // §30.5 V8-T4 — the lotus pools ride only under the flag (default URLs never pay the draws)
+    rippleP = new Particles(lifeGroup, U(), 24, DRIFT_FS(), 19, true);
+    flyP    = new Particles(lifeGroup, U(), 20, MOTE_FS(),  24, false);
+  }
   initMotes(); initBirds();
 
   train.onChuff = (wp, fwd, spd)=>{
@@ -12168,7 +12924,19 @@ async function boot(){
   if(State.lotus){
     const lotusShrine = buildLotusShrine();
     scene.add(lotusShrine);
-    if(QS.has('dbg')) console.log('lotus temple: floating at (-63, 145) on the pond, tris:', lotusShrine.geometry.index.count/3);   // §29.1 T0.5: boot-log hygiene
+    scene.add(LOTUS.padsMesh);                    // §30.3 V8R — the stone bridge + lily garden (static; the bloom bobs alone)
+    waterMesh.material.uniforms.uLotusGlow.value.set(LOTUS.x, LOTUS.z, 10.0, 0.72);   // §30.6 V8-T5 — the lantern band on the water (0.72/10: reads at 130 m in permanent dusk, v8x witness)
+    waterMesh.material.uniforms.uLotusHull.value.set(LOTUS.skirtR + 0.8, 0.14, 0, 0); // §30.6 V8R — contact shading under the bloom (reach derives from the skirt)
+    /*  §30.7 V8-T6 — the incense thermal: EXACTLY the §29.2-A1 recipe — ONE
+        THERMALS entry and the lift, variometer, seeds and tbirds all wire
+        themselves.  Strength matches the WEAKEST village smoker (s = 1.5);
+        cyc/ph deterministic from position like the chimneys (no rng).  It
+        rides only under ?lotus=1, so air.js's nearest-thermal witnesses on
+        default URLs never see it (the INN_HEARTH lesson).                  */
+    THERMALS.push({ x:LOTUS.x, z:LOTUS.z, yTop: LOTUS.floatY + 9, r:7, s:1.5,
+      cyc: 80 + (Math.abs(LOTUS.x)*7 % 60), ph: (Math.abs(LOTUS.z)*0.13) % 1 });
+    LOTUS.th = THERMALS[THERMALS.length-1];
+    if(QS.has('dbg')) console.log('lotus temple: floating at (-63, 145) on the pond, tris:', lotusShrine.geometry.index.count/3, '· bridge span:', LOTUS.cwB ? (LOTUS.cwB.s1w-LOTUS.cwB.s0).toFixed(1)+' m' : 'none');   // §29.1 T0.5: boot-log hygiene
   }
 
   // diagnostics
@@ -12254,7 +13022,7 @@ async function boot(){
   window.__PX = PX_DBG; window.__FENCE = ()=> routeFence;
   // §W6 — the dressing-site witnesses (plan-mandated one-time clearances; same
   // class as the __W/__U/__S driver row above)
-  window.__SITE = { VILLAGE, SHRINE_POS, INN_OBB, INN_HEARTH, SOLIDS, riverField, riverWidth, waterLevel, TRACK:()=>TRACK };
+  window.__SITE = { VILLAGE, SHRINE_POS, INN_OBB, INN_HEARTH, SOLIDS, riverField, riverWidth, waterLevel, TRACK:()=>TRACK, LOTUS:()=>LOTUS, lotusTopAt };
   window.__snowP = snowP; window.__leafP = leafP; window.__rainP = rainP; window.__streakP = streakP; window.__seedP = seedP;
   window.__WIND = WindSys;                            // wind state (squalls), for tests
   window.__BIRDS = BIRDS;                            // flock state, for A/B and tests
@@ -12559,6 +13327,111 @@ function updateMotes(dt, cam){
     d.age = 0;
     if(!isFinite(d.x+d.y+d.z)){ d.x=cam.position.x; d.z=cam.position.z;
       d.y=sampleHeight(d.x,d.z)+2; d.vx=d.vy=d.vz=0; }
+  }
+}
+/*──────────────── §30.5 V8-T4 — the lotus must actually float ──────────────
+   ONE shared lotusBob(t) feeds BOTH the render transform and the collision
+   tops (solids, spire ridge, walkable pads via LOTUS.bob.dy) so physics and
+   render can never drift (§W2).  Slow and heavy: 14 m of stone flower is not
+   a cork.  updateLotus also owns the causeway buoyancy dips, contact/ambient
+   ripples, and the firefly orbit — all presentation, all inside frame()'s
+   pause gate, everything gated on the pools existing (?lotus=1 only).      */
+function lotusBob(t){
+  const B = LOTUS.bob;
+  B.dy = 0.05*Math.sin(t*0.5) + 0.02*Math.sin(t*1.3 + 1.7);
+  B.rx = 0.4*DEG*Math.sin(t*0.5 + Math.PI/2);
+  B.rz = 0.4*DEG*Math.sin(t*1.3 + 1.7 + Math.PI/2);
+  return B;
+}
+let _lotusRipT = 2.5, _lotusStepT = 0, _lotusDyPrev = 0, _lotusDvPrev = 0;
+function updateLotus(dt, t){
+  const L = LOTUS;
+  const B = lotusBob(t);
+  L.mesh.position.y = L.floatY + B.dy;
+  L.mesh.rotation.x = B.rx; L.mesh.rotation.z = B.rz;
+  for(let i=0;i<L.solids.length;i++) L.solids[i].s.top = L.solids[i].base + B.dy;
+  L.roof.r.top = L.roof.base + B.dy;
+  /* §30.5 petal sway — the grass's own wind field leans the bloom ±2% by
+     height; eased so a squall arrives as a lean, never a snap */
+  {
+    const w = windAtJS(L.x, L.z, 5);
+    const sp = Math.hypot(w.x, w.z) || 1;
+    const lean = clamp(w.speed/8, 0, 1)*0.02;
+    const k = clamp(dt*1.2, 0, 1);
+    LOTUS_SWAY_U.value.x += (w.x/sp*lean - LOTUS_SWAY_U.value.x)*k;
+    LOTUS_SWAY_U.value.y += (w.z/sp*lean - LOTUS_SWAY_U.value.y)*k;
+  }
+  /* a perched straddler rides the swell: refresh the frozen perch height */
+  if(walker && walker._perch != null){
+    const dxp = walker.pos.x - L.x, dzp = walker.pos.z - L.z;
+    if(dxp*dxp + dzp*dzp < 16 && Math.abs(walker._perch - L.roof.r.top) < 0.6)
+      walker._perch = L.roof.r.top;
+  }
+  /* §30.3 V8R — the bridge is one static stone (no buoyancy dips to run);
+     ripple COUPLING now rides the bob itself, below.                       */
+  if(rippleP){
+    /* age the rings; the shader expands them (ring radius rides vAge) */
+    for(let i=0;i<rippleP.max;i++){
+      const d = rippleP.data[i]; if(!d.alive) continue;
+      d.age += dt;
+      if(d.age >= d.life) rippleP.kill(d);
+    }
+    /* §30.5 V8R — every crest of the swell (dy peak → falling) breathes a
+       ring off the hull's shoulders: pond and stone visibly share ONE
+       motion — the "floating, not hovering" coupling.  Rate-limited; two
+       rings on opposite shoulders so the pond answers evenly.              */
+    const dv = B.dy - _lotusDyPrev;
+    _lotusRipT -= dt;
+    if(_lotusDvPrev > 1e-5 && dv <= 1e-5 && _lotusRipT <= 0){
+      _lotusRipT = 2.2;
+      const az = (t*0.31) % TAU;
+      for(let k=0;k<2;k++){
+        const a2 = az + k*Math.PI;
+        rippleP.spawn({ x:L.x + Math.sin(a2)*(L.drumR + 0.25), y:L.floatY + 0.03,
+          z:L.z + Math.cos(a2)*(L.drumR + 0.25), vx:0, vy:0, vz:0, age:0,
+          life:3.2, size:L.drumR*0.95, seed:(t*7 + k*31)%100, kind:7, op:0.42 - k*0.10 });
+      }
+    }
+    _lotusDvPrev = dv; _lotusDyPrev = B.dy;
+    /* contact rings under a walker at WATER level — wading near the bloom or
+       crossing the drum/shore landings; never under the bridge's dry crown
+       (groundY well above the pond is the tell)                            */
+    _lotusStepT -= dt;
+    if(_lotusStepT <= 0 && walker && !walker.fly){
+      const moving = Math.hypot(walker.vel.x, walker.vel.z) > 0.6;
+      if(moving){
+        const dxw = walker.pos.x - L.x, dzw = walker.pos.z - L.z;
+        const dcw = dxw*dxw + dzw*dzw;
+        if(dcw < L.bloomRR*1.4 || dcw < L.cwC.rr){
+          const wl = waterLevel(riverField(walker.pos.x, walker.pos.z).t);
+          if(walker.groundY < wl + 0.5){
+            _lotusStepT = 0.7;
+            rippleP.spawn({ x:walker.pos.x, y:wl + 0.03, z:walker.pos.z,
+              vx:0, vy:0, vz:0, age:0, life:2.0, size:1.1, seed:(t*11)%100, kind:7, op:0.45 });
+          } else _lotusStepT = 0.3;
+        } else _lotusStepT = 0.3;
+      }
+    }
+  }
+  if(flyP){
+    /* 16 fireflies on slow Lissajous orbits, 0.5–3 m off the bloom; spawned
+       once, steered every frame (no wind advection — they own their paths) */
+    if(flyP.n === 0 && flyP.free.length === flyP.max){
+      for(let i=0;i<16;i++)
+        flyP.spawn({ x:L.x, y:L.floatY+1.5, z:L.z, vx:0, vy:0, vz:0,
+          age:0, life:1e7, size:0.045, seed:i*6.31 + 2.4, kind:3, op:0.85 });
+    }
+    let k = 0;
+    for(let i=0;i<flyP.max;i++){
+      const d = flyP.data[i]; if(!d.alive) continue;
+      const j = k++;
+      const rA = 2.7 + (j%5)*0.55, rB = 3.1 + (j%4)*0.5;
+      const w1 = 0.11 + (j%3)*0.05, w2 = 0.09 + (j%4)*0.04;
+      d.x = L.x + Math.sin(t*w1 + j*2.39)*rA;
+      d.z = L.z + Math.cos(t*w2 + j*1.71)*rB;
+      d.y = L.floatY + 1.1 + 1.5*(0.5 + 0.5*Math.sin(t*(0.16 + (j%5)*0.03) + j*3.1));
+      d.age = 0;
+    }
   }
 }
 const BIRDS=[];
@@ -12887,7 +13760,7 @@ function updateSmoke(dt){
     if(!isFinite(d.x+d.y+d.z+d.size)) smoke.kill(d);
   }
 }
-let villSmokeT=0, innSmokeT=0, cragWispT=0, townWispT=0;
+let villSmokeT=0, innSmokeT=0, cragWispT=0, townWispT=0, lotusSmokeT=0;
 let _topSmokers=null;   // §22-F5 — the three strongest chimneys (braid weighting), sorted once
 function emitVillageSmoke(dt){
   villSmokeT -= dt;
@@ -12942,6 +13815,18 @@ function emitVillageSmoke(dt){
       smoke.spawn({ x:INN_HEARTH.x, y:INN_HEARTH.y, z:INN_HEARTH.z,
         vx:0, vy:0.9, vz:0, life:7+Math.random()*3, size:0.16+Math.random()*0.08,
         seed:Math.random()*100, kind:1, op:0.35 });
+    }
+  }
+  /* §30.7 V8-T6 — incense from the lotus finial: the same LOCAL-emitter
+     pattern as the irori (never villageSmokers).  A thin warm ribbon, gentler
+     rate than any chimney; windAtJS bends it in updateSmoke like all smoke. */
+  if(LOTUS !== null){
+    lotusSmokeT -= dt;
+    if(lotusSmokeT <= 0){
+      lotusSmokeT = 1.0 + Math.random()*1.2;   // V8R2 — "puff timeing could be a bit more random?" (mean ~1.6 s kept; Math.random never touches the deterministic rng streams)
+      smoke.spawn({ x:LOTUS.spire.x, y:LOTUS.spire.y + LOTUS.bob.dy, z:LOTUS.spire.z,
+        vx:0, vy:0.8, vz:0, life:9+Math.random()*4, size:0.13+Math.random()*0.07,
+        seed:Math.random()*100, kind:1, op:0.30 });
     }
   }
 }
@@ -13613,6 +14498,7 @@ function frame(now){
   updateSmoke(sdt); emitVillageSmoke(sdt);
   updateMotes(sdt, camera); updateBirds(sdt, tAcc);
   updateSnow(sdt, camera); updateLeaves(sdt, camera); updateRain(sdt, camera); updateSeeds(sdt, camera); if(petalP) updatePetals(sdt, camera);
+  if(LOTUS !== null) updateLotus(sdt, tAcc);   // §30.5 V8-T4 — bob + dips + ripples + fireflies (one writer for the shared bob)
   // §T14c — dive streamers: only a real fast dive sheds one per wingtip, and
   // they trail behind the wing (velocity opposite the heading) like condensation
   if(State.streaks && walker.fly && walker._airV > 19){
@@ -13628,6 +14514,8 @@ function frame(now){
   snowP.commit(camera.position); leafP.commit(camera.position); rainP.commit(camera.position); streakP.commit(camera.position);
   seedP.commit(camera.position);
   if(petalP) petalP.commit(camera.position);
+  if(rippleP) rippleP.commit(camera.position);
+  if(flyP) flyP.commit(camera.position);
 
   cloudSortT -= sdt;
   if(cloudSortT <= 0){ cloudSortT = (State.cloudnear && walker && walker.fly && camera.position.y > 180) ? 0.15 : 0.4; sortClouds(); }
@@ -14070,7 +14958,9 @@ const FIRSTS = { takeoff:'the first flight', thermal:'rode a thermal', cloudtop:
   shrine:'the hillside shrine', shelter:'out of the rain — the kettle was warm',
   shelf:'found a shelf of the star pillar', brush:'brushed the pillar wall in passing',
   cragcloud:'rode the cloud above the crag', cragname:'the star pillar has a name',
-  petalcatch:'caught a falling petal' };
+  petalcatch:'caught a falling petal',
+  lotus:'the floating temple', lotusIn:'stepped inside the light',
+  incense:"rode the temple's incense skyward" };
 let _firstSeen = null;
 function first(id){
   if(!_firstSeen){ _firstSeen = {}; if(PERSIST){ try{ _firstSeen = JSON.parse(localStorage.getItem('hoshi_firsts')||'{}'); }catch(e){} } }
@@ -14122,6 +15012,8 @@ function hintSeen(id){
 const Input = {
   stick: { x: 0, y: 0 },   // −1..1; x + = bank/turn right, y + = tipped forward
   tiltDegY: 0,             // smoothed fore/aft tilt, degrees from neutral
+  feedN: 0,                // §M3 — count of tilt samples ever fed (first-steps liveness valve; harness witness)
+  dragPx: 0,               // §M3 — cumulative look-drag finger travel in px (first-steps look witness; harness probes it)
   hasTouch: HAS_TOUCH,
   /*  §M1b — the tilt response knobs, overridable by the shell that hosts the
       game (window.__TILT_TUNE, read once at boot: the PWA build ships a
@@ -14157,6 +15049,7 @@ const TiltCtl = (()=>{
   }
   function feed(gx, gy, gz){
     const L = Math.hypot(gx, gy, gz); if(!(L > 0.5)) return;
+    Input.feedN++;   // §M3 — tilt liveness (the first-steps valve reads it; 0 forever = no tilt source)
     const t = performance.now();
     const dt = has ? Math.min(0.1, (t - tPrev)/1000) : 1;   // first sample lands unsmoothed
     tPrev = t;
@@ -14199,6 +15092,206 @@ const TiltCtl = (()=>{
 window.__hoshiTilt = (gx, gy, gz)=>{ TiltCtl._ext(true); TiltCtl.feed(gx, gy, gz); };
 window.__hoshiTiltCal = TiltCtl.cal;   // wrapper + harness recalibrate hook
 
+/*──────────────── §M3 — FIRST STEPS (the walk-before-fly onboarding) ───────
+    Owner-commissioned (ipad handoff §10): a first-run, touch-only lesson.
+    One verb per card — set level (tap) · look (right-half drag) · turn (tilt
+    left, then right) · walk (tilt away, then back) · walk level (left-thumb
+    hold) · run (deep forward tilt) — and each card is dismissed ONLY by
+    witnessing the real input on the SAME channels the harnesses probe
+    (Input.stick / Input.dragPx / walker.keys), never by a timer.  Flying
+    stays locked until the sequence completes: toggleFly's take-off half and
+    the hold-Space take-off both ask OB.lockFly() and show one gentle line;
+    landing paths are never gated.  Pure DOM/HUD (§28.3 — zero render work):
+    the #ob card is pointer-events:none and display:none until started.
+    GATING: State.onb = qsBool('onb', HAS_TOUCH) is the system gate (?onb=0
+    total escape, lock included).  A NATURAL run needs PERSIST (bench URLs
+    never see it; headless profiles are first-runs by construction) and no
+    stored completion (localStorage hoshi_ob, the hintOnce idiom).  ?onb=1
+    forces a run (the harness door and a manual demo).  Desktop: HAS_TOUCH
+    false ⇒ never armed, zero listeners, zero DOM shown — byte-identical
+    behavior.  Replay: the touch-only gear-panel row calls OB.start().
+    SAFETY VALVE: if no tilt sample has EVER arrived (Input.feedN 0) and the
+    player keeps touching anyway, the tilt cards are skipped rather than
+    trapping them — witnessed on touches, not on time.                      */
+const OB = (()=>{
+  const THR = { turn:0.35, fwd:0.30, back:-0.20, run:0.85,   // stick witnesses
+                dragPx:140, sustain:0.35, runS:0.45, holdS:0.7 };
+  const SVG = b=>'<svg width="220" height="96" viewBox="0 0 220 96" fill="none" stroke="#F6ECD8"'
+    + ' stroke-width="5" stroke-linecap="round" stroke-linejoin="round">' + b + '</svg>';
+  const TRACK_X = '<path d="M40 76 H180" opacity=".3"/><path d="M110 70 V82" opacity=".3"/>',
+        TRACK_Y = '<path d="M172 16 V80" opacity=".3"/><path d="M166 48 H178" opacity=".3"/>',
+        DOT_X   = '<circle id="obDot" cx="110" cy="76" r="6" fill="#F6ECD8" stroke="none"/>',
+        DOT_Y   = '<circle id="obDot" cx="172" cy="48" r="6" fill="#F6ECD8" stroke="none"/>';
+  const ART = {
+    grip: SVG('<rect x="62" y="18" width="96" height="60" rx="10" opacity=".55"/>'
+        + '<g id="obLit" opacity=".3"><circle cx="84" cy="62" r="7" fill="#F6ECD8" stroke="none"/>'
+        + '<circle cx="136" cy="62" r="7" fill="#F6ECD8" stroke="none"/></g>'
+        + '<path d="M82 66 Q74 84 58 90" opacity=".45"/><path d="M138 66 Q146 84 162 90" opacity=".45"/>'),
+    drag: SVG('<g id="obLit" opacity=".3"><path d="M72 30 L46 48 L72 66"/><path d="M148 30 L174 48 L148 66"/></g>'
+        + '<path d="M94 48 H126" opacity=".3"/><circle cx="110" cy="48" r="9" fill="#F6ECD8" stroke="none" opacity=".9"/>'),
+    tl:   SVG('<g id="obLit" opacity=".3"><path d="M156 36 A50 50 0 0 0 64 32"/><path d="M64 32 L80 24 M64 32 L72 48"/></g>'
+        + TRACK_X + '<path d="M85 72 V80" opacity=".5"/>' + DOT_X),
+    tr:   SVG('<g id="obLit" opacity=".3"><path d="M64 36 A50 50 0 0 1 156 32"/><path d="M156 32 L140 24 M156 32 L148 48"/></g>'
+        + TRACK_X + '<path d="M135 72 V80" opacity=".5"/>' + DOT_X),
+    fwd:  SVG('<g id="obLit" opacity=".3"><path d="M84 46 L106 26 L128 46"/><path d="M84 70 L106 50 L128 70"/></g>'
+        + TRACK_Y + '<path d="M167 39 H177" opacity=".5"/>' + DOT_Y),
+    back: SVG('<g id="obLit" opacity=".3"><path d="M84 26 L106 46 L128 26"/><path d="M84 50 L106 70 L128 50"/></g>'
+        + TRACK_Y + '<path d="M167 54 H177" opacity=".5"/>' + DOT_Y),
+    hold: SVG('<rect x="55" y="16" width="110" height="64" rx="12" opacity=".45"/><path d="M110 22 V74" opacity=".2"/>'
+        + '<g id="obLit" opacity=".3"><circle cx="82" cy="58" r="16"/><circle cx="82" cy="58" r="8" fill="#F6ECD8" stroke="none"/></g>'),
+    run:  SVG('<g id="obLit" opacity=".3"><path d="M84 38 L106 20 L128 38"/><path d="M84 58 L106 40 L128 58"/><path d="M84 78 L106 60 L128 78"/></g>'
+        + TRACK_Y + '<path d="M167 22 H177" opacity=".5"/>' + DOT_Y),
+  };
+  /*  the cards: d = progress dot (5 verbs; the grip card lights none) · tilt
+      marks cards the no-tilt valve may skip · nudge overrides the lock line
+      where the generic one would mislead.  The GRIP card (owner design,
+      2026-08-30) merges three moments into ONE thumb tap: it teaches the
+      two-hand hold, its tap fires the OS motion popup INSIDE the player's
+      own gesture (iPadOS gates web tilt behind that popup and names the site
+      by its address — cold at the title it read hostile, §4.0i of the ipad
+      handoff), and the pose held when tilt starts flowing becomes level.
+      It always shows (a replay re-levels through it); denial cannot trap —
+      the no-tilt valve skips every tilt card.                               */
+  const CARDS = [
+    { d:-1, art:'grip', t:'hold the iPad with both hands, like a tray — get comfortable, then tap. if it asks about motion, choose Allow.', tilt:1 },
+    { d: 0, art:'drag', t:'rest a finger on the right half and slide it — you look around.' },
+    { d: 1, art:'tl',   t:'tilt left, like carrying a tray — you turn left.', tilt:1 },
+    { d: 1, art:'tr',   t:'lovely. now tilt right.', tilt:1 },
+    { d: 2, art:'fwd',  t:'tip the top edge away from you — you walk forward.', tilt:1 },
+    { d: 2, art:'back', t:'tip it back toward you — you slow, then step back.', tilt:1 },
+    { d: 3, art:'hold', t:'let it rest level again. press and hold your left thumb — you walk without tilting.',
+      nudge:"hold the thumb down, don't tap" },
+    { d: 4, art:'run',  t:'one more: tip further forward and hold it — you run.', tilt:1 },
+  ];
+  const eligible = ()=>{
+    if(!State.onb || !Input.hasTouch) return false;
+    if(QS.has('onb')) return true;          // forced: the harness door / manual demo
+    if(!PERSIST) return false;              // measurement URLs never see it
+    try{ return !localStorage.getItem('hoshi_ob'); }catch(e){ return true; }
+  };
+  const armed = eligible();
+  let el=null, cardEl=null, artEl=null, txtEl=null, dotsEl=null, litEl=null, dotEl=null;
+  let on=false, done=false, step=-1, acc=0, base=0, last=0, raf=0, byeT=0;
+  let skipTilt=false, touchN=0, tN0=0, tapSeen=false, gripTap=false, nudgeT=0;
+  function build(){
+    el = $('#ob'); cardEl = $('#obCard'); artEl = $('#obArt'); txtEl = $('#obTxt'); dotsEl = $('#obDots');
+    // window-level, passive, touch-only observers: they never eat or reorder
+    // the canvas gestures — the canvas handlers run first (target phase)
+    addEventListener('touchstart', ()=>{ touchN++; if(on && step === 0) tapSeen = true; }, { passive:true });
+    addEventListener('touchend', ()=>{
+      if(!on || step !== 0 || !tapSeen) return; tapSeen = false;
+      /*  the grip card's thumb tap: fire the OS motion popup inside THIS
+          gesture (latched — repeat taps never re-prompt), then level at the
+          held pose the moment tilt flows: right here when it already does
+          (replay / pre-attached), else from tick when the grant lands.      */
+      gripTap = true; TiltCtl.browser();
+      if(Input.feedN > 0){ TiltCtl.cal(); toast('level set'); pass(); }
+    }, { passive:true });
+  }
+  function dots(d){
+    let h = ''; for(let k=0;k<5;k++) h += '<i class="'+(k<d?'was':k===d?'on':'')+'"></i>';
+    dotsEl.innerHTML = h;
+  }
+  function next(i){
+    while(i < CARDS.length && skipTilt && CARDS[i].tilt) i++;
+    if(i >= CARDS.length) return finish();
+    step = i; acc = 0; base = Input.dragPx; tN0 = touchN; tapSeen = false; gripTap = false; last = 0;
+    const c = CARDS[i];
+    artEl.innerHTML = ART[c.art]; txtEl.textContent = c.t; dots(c.d);
+    litEl = artEl.querySelector('#obLit'); dotEl = artEl.querySelector('#obDot');
+  }
+  function pass(){
+    if(audio && audio.note) audio.note(587.33, 0.035, 1.1);
+    next(step + 1);
+  }
+  function finish(){
+    step = CARDS.length; done = true;
+    if(PERSIST){ try{ localStorage.setItem('hoshi_ob','1'); }catch(e){} }
+    artEl.innerHTML = ''; txtEl.textContent = "that's the walk. the valley is yours — wander.";
+    dots(5);
+    if(audio && audio.note){ audio.note(659.25, 0.05, 1.4); setTimeout(()=>{ if(audio && audio.note) audio.note(880, 0.04, 1.8); }, 240); }
+    el.classList.add('bye');
+    /*  the fade teardown must never eat a replay begun during the 4.2 s fade
+        (gear "show again" right after finishing): a restart clears the timer
+        AND the body re-checks — done flips false the moment start() runs.   */
+    clearTimeout(byeT);
+    byeT = setTimeout(()=>{ if(!done) return;
+      on = false; el.style.display = 'none'; el.classList.remove('bye');
+      $('#hud').classList.remove('ob'); }, 4200);
+  }
+  function paint(c, g, sx, sy){
+    if(litEl){
+      litEl.classList.toggle('obPulse', g <= 0.02);
+      litEl.style.opacity = g > 0.02 ? String(0.3 + 0.7*g) : '';
+    }
+    if(dotEl){
+      if(c.art === 'tl' || c.art === 'tr') dotEl.setAttribute('transform', 'translate(' + (70*clamp(sx,-1,1)).toFixed(1) + ',0)');
+      else dotEl.setAttribute('transform', 'translate(0,' + (-30*clamp(sy,-1,1)).toFixed(1) + ')');
+    }
+  }
+  function tick(t){
+    raf = on ? requestAnimationFrame(tick) : 0;
+    if(!on) return;
+    const dt = Math.min(0.1, last ? (t - last)/1000 : 0.016); last = t;
+    if(step < 0 || step >= CARDS.length) return;
+    const c = CARDS[step];
+    /*  the no-tilt valve: a tilt card armed while NO tilt sample has ever
+        arrived, and the player keeps touching anyway — skip the tilt cards
+        (witnessed on their touches, never on a clock).  The grip card needs
+        one MORE touch than the rest: its own ask-tap is touch #1 and the OS
+        popup may still be coming up — an eager double-tap must not cost the
+        whole tilt lesson, while tap-Cancel-tap-tap still reads as "move on". */
+    if(c.tilt && !(Input.feedN > 0) && touchN - tN0 >= (c.art === 'grip' ? 3 : 2)){
+      skipTilt = true;
+      toast("tilt isn't reaching the game — walking by thumb still works");
+      return next(step + 1);
+    }
+    const sx = Input.stick.x, sy = Input.stick.y;
+    let g = 0, cond = false, need = THR.sustain;
+    switch(c.art){
+      case 'grip': if(gripTap && Input.feedN > 0){   // tapped, and tilt truly flows (grant witnessed, never assumed)
+          TiltCtl.cal(); toast('level set'); return pass(); } break;
+      case 'drag': { const cum = Input.dragPx - base; g = cum/THR.dragPx;
+        if(cum >= THR.dragPx) return pass(); break; }
+      case 'tl':   cond = sx <= -THR.turn; g = Math.max(-sx/THR.turn*0.55, acc/need); break;
+      case 'tr':   cond = sx >=  THR.turn; g = Math.max( sx/THR.turn*0.55, acc/need); break;
+      case 'fwd':  cond = sy >=  THR.fwd;  g = Math.max( sy/THR.fwd *0.55, acc/need); break;
+      case 'back': cond = sy <=  THR.back; g = Math.max( sy/THR.back*0.55, acc/need); break;
+      case 'run':  need = THR.runS; cond = sy > THR.run; g = Math.max(sy/THR.run*0.55, acc/need); break;
+      case 'hold': need = THR.holdS; cond = !!(walker && walker.keys['KeyW']);
+        g = cond ? Math.min(1, 0.4 + acc/need) : 0; break;
+    }
+    if(c.art !== 'grip' && c.art !== 'drag'){
+      acc = cond ? acc + dt : Math.max(0, acc - dt*2);
+      if(acc >= need) return pass();
+    }
+    paint(c, clamp(g, 0, 1), sx, sy);
+  }
+  function start(){
+    if(on && !done) return;         // already teaching — but a done-card fade may be reclaimed
+    if(!el) build();
+    clearTimeout(byeT);
+    on = true; done = false; skipTilt = false; step = -1;
+    $('#hud').classList.add('ob');
+    setTimeout(()=>{ if(!on) return;
+      el.style.display = 'flex'; el.classList.remove('bye'); next(0);
+    }, 1400);   // display grace only (the veil is still fading) — never advances a step
+    if(!raf) raf = requestAnimationFrame(tick);
+  }
+  function nudge(){
+    if(!on || step <= 0) return;                       // pre-show + the grip card's own tap stay quiet
+    const now = performance.now(); if(now - nudgeT < 700) return; nudgeT = now;
+    toast((CARDS[step] && CARDS[step].nudge) || 'flying comes later — one step at a time');
+    if(cardEl){ cardEl.classList.remove('nod'); void cardEl.offsetWidth; cardEl.classList.add('nod'); }
+  }
+  return { start, nudge,
+    pending: ()=> armed && !done,
+    lockFly: ()=> (armed || on) && !done,
+    get armed(){ return armed; }, get on(){ return on; },
+    get step(){ return step; }, get done(){ return done; } };
+})();
+window.__OB = OB;   // harness witness + the PWA beacon's ob field
+
 /*──────────────────────────── input ───────────────────────────────────────*/
 function bindInput(){
   const cv = renderer.domElement;
@@ -14232,6 +15325,7 @@ function bindInput(){
           auto-land finish the arrival.                                        */
       walker._landIntent = true; toast('coming down — spread and settle');
     } else {
+      if(OB.lockFly()){ OB.nudge(); return; }   // §M3 — first steps first: the take-off half of F stays locked mid-lesson (landing above is never gated)
       walker._takeoff();          // A1: same eased rise as hold-Space
       toast(Input.hasTouch ? 'flight — right thumb flaps, tilt to steer'
                            : 'flight — hold space to flap, look to steer');
@@ -14406,6 +15500,7 @@ function bindInput(){
           if(!rec.spc && !rec.wk && !rec.left && lookId === null){ lookId = rec.id; rec.lx = t.clientX; rec.ly = t.clientY; }
         }
         if(lookId === rec.id){
+          Input.dragPx += Math.abs(t.clientX - rec.lx) + Math.abs(t.clientY - rec.ly);   // §M3 — the first-steps look card witnesses real drag travel
           walker.look((t.clientX - rec.lx)*LOOKK, (t.clientY - rec.ly)*LOOKK);
           rec.lx = t.clientX; rec.ly = t.clientY;
         }
@@ -14459,6 +15554,23 @@ function bindInput(){
     const note = document.querySelector('#panel .note');
     if(note) note.innerHTML = 'Tap the gear to close, tap the view to close.  '
       + 'A <b>two-finger double-tap</b> re-captures the tilt neutral pose.';
+    /*  §M3 — first-steps replay: a touch-only Tools row, DOM added HERE so the
+        desktop panel stays byte-identical.  Replaying re-arms the fly lock
+        until the run completes (landing is never gated).                     */
+    if(State.onb){
+      const rw = document.createElement('div'); rw.className = 'row';
+      rw.innerHTML = '<label>First steps</label><div class="seg"><button type="button" id="pOb">show again</button></div>';
+      const anchor = $('#pReset').closest('.row');
+      anchor.parentNode.insertBefore(rw, anchor.nextSibling);
+      $('#pOb').addEventListener('click', ()=>{ $('#panel').classList.remove('on'); OB.start(); });
+    }
+    /*  §M3 — returning players still meet the OS motion popup at the entry
+        tap (tilt IS the steering; iPadOS may re-ask per launch): give the
+        title card one small honest line so it never lands cold.  First-runs
+        get the popup inside the lesson's grip card instead — no line.       */
+    if(typeof DeviceOrientationEvent !== 'undefined'
+       && typeof DeviceOrientationEvent.requestPermission === 'function'
+       && !OB.pending()) $('#allowNote').style.display = 'block';
     const ui = $('#touchUI'); ui.style.display = 'flex';
     $('#tFly').addEventListener('click', ()=>{ audio.resume(); toggleFly(); });
     $('#tPause').addEventListener('click', togglePause);
@@ -14614,8 +15726,19 @@ function bindInput(){
         right now becomes neutral (a two-finger double-tap re-captures it any
         time), and the browser tilt path asks its DeviceOrientation permission
         inside this same gesture (GH-Pages route; the wrapper's CoreMotion
-        bridge needs no permission and simply out-ranks it).                  */
-    if(Input.hasTouch){ TiltCtl.cal(); TiltCtl.browser(); }
+        bridge needs no permission and simply out-ranks it).
+        §M3 rework (owner report 2026-08-30 — the OS motion popup read hostile
+        cold at the title): when the FIRST-STEPS lesson is pending AND the
+        permission API exists, the request is DEFERRED to the lesson's ask
+        card, which explains the popup and fires it from the player's own tap.
+        No API (non-iOS glass) ⇒ attach directly here as always; returning
+        players (no lesson) keep the entry-tap ask — tilt is the steering.   */
+    if(Input.hasTouch){
+      TiltCtl.cal();
+      const askAPI = typeof DeviceOrientationEvent !== 'undefined'
+        && typeof DeviceOrientationEvent.requestPermission === 'function';
+      if(!askAPI || !OB.pending()) TiltCtl.browser();
+    }
     /*  §M1e — glass plays truly fullscreen: the entry gesture is the ONE moment
         the OS lets a page hide its clock/battery furniture (the Fullscreen API
         needs a user gesture; standalone web apps otherwise keep the status
@@ -14628,9 +15751,29 @@ function bindInput(){
       const rf = el.requestFullscreen || el.webkitRequestFullscreen;
       if(rf) try{ const p = rf.call(el); if(p && p.catch) p.catch(()=>{}); }catch(e){}
     }
+    /*  §M1g — keep the glass awake: tilt flight is minutes of NO touches, so
+        iPadOS dims toward auto-lock mid-glide (tester report).  The Wake Lock
+        is re-grabbed whenever the page returns to view (locks auto-release on
+        hide).  Touch-gated; desktop power policy is not the game's business. */
+    if(Input.hasTouch && navigator.wakeLock){
+      let _wl = null;
+      const grab = ()=>{ navigator.wakeLock.request('screen')
+        .then(l=>{ _wl = l; }).catch(()=>{}); };
+      grab();
+      addEventListener('visibilitychange', ()=>{
+        if(!document.hidden && (!_wl || _wl.released)) grab();
+      });
+    }
     $('#veil').classList.add('gone');
     $('#hud').classList.add('on');
     setTimeout(()=>{ $('#veil').style.display='none'; }, 1700);
+    /*  §M3 — the first-steps lesson starts here (touch first-run or a forced
+        run only): the entry tap above just set the tilt neutral, so the
+        lesson opens on a calibrated hold.  While it is pending it owns the
+        teaching — the keyboard-flavored hint drip below stays silent (its
+        space-to-fly line would fight the walk-first lock).                  */
+    const obGo = OB.pending();
+    if(obGo) OB.start();
     if(!Input.hasTouch && cv.requestPointerLock) cv.requestPointerLock();
     // a restored setting that alters the controls announces itself, or a stray
     // click on "Invert Y" three sessions ago is indistinguishable from a bug
@@ -14643,12 +15786,14 @@ function bindInput(){
     if(PERSIST){ try{ seen = !!localStorage.getItem('hoshi_seen'); }catch(e){} }
     if(!seen){
       try{ localStorage.setItem('hoshi_seen','1'); }catch(e){}
-      const hints = [
-        [ 5000, 'hold space to take off — look to steer'],
-        [20000, 'dive, then pull up gently — the valley gives the height back'],
-        [36000, 'S spreads the wings to slow · F to come down · tab hides the hud'],
-      ];
-      for(const [ms,msg] of hints) setTimeout(()=>toast(msg), ms);
+      if(!obGo){   // §M3 — the lesson supersedes the drip on a touch first-run
+        const hints = [
+          [ 5000, 'hold space to take off — look to steer'],
+          [20000, 'dive, then pull up gently — the valley gives the height back'],
+          [36000, 'S spreads the wings to slow · F to come down · tab hides the hud'],
+        ];
+        for(const [ms,msg] of hints) setTimeout(()=>toast(msg), ms);
+      }
     }
   };
   $('#enter').addEventListener('click', startGame);
