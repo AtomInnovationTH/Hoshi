@@ -1959,31 +1959,74 @@ function bakeSplat(){
      (T1 "grasss is growing up thru the bridge" / T2 "add a branch to lotus").
      The landing capsule re-derives the door axis from the SAME constants
      buildLotusShrine uses (CFG.spawn ↔ the (-63,145) siting — L-2).        */
-  let SPUR_DF = null, lbAx = 0, lbAz = 0, lbUx = 0, lbUz = 0, lbL = 0;
+  let SPUR_DF = null, lbAx = 0, lbAz = 0, lbUx = 0, lbUz = 0, lbL = 0, clX = 0, clZ = 0;
+  let spB = null, brB = null;   // spur / pillar-branch bboxes for the analytic early-outs
+  const RIB_IN = 2.4, RIB_OUT = 4.6;   // §31.V8R2E review — the ONE analytic ribbon width (full-bare / feather), shared by the spur, the branch and the capsule's inland taper; bboxes pad by RIB_OUT+0.2
   if(State.lotus){
-    SPUR_DF = makeDF(SPUR_PTS.map((p,i)=>({x:p[0], z:p[1], t:i/SPUR_PTS.length})), 384);
+    /* §31.V8R2E T2v4 — the spur bares ANALYTICALLY (exact point-to-polyline
+       distance, the runway capsule's own idiom): makeDF's 384 grid snaps
+       seeds to 6.25 m cells out here, which broke the painted spur into
+       stray blobs up to ±3 m off the line (v8r2e7/f1 plan witnesses).  The
+       SPUR_PTS are 0.23 m apart, so point distance ≈ segment distance; the
+       bbox early-out keeps the 512² bake loop cheap.                       */
+    SPUR_DF = true;
+    /* the bridge axis, bloom→shore — derived ONCE (L-2; review: the assert
+       below used to re-derive its own copy and could drift)                */
+    const lyaw = Math.atan2(CFG.spawn.x - (-63), CFG.spawn.z - 145);
+    lbUx = Math.sin(lyaw); lbUz = Math.cos(lyaw);
+    { let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+      for(const p of SPUR_PTS){ if(p[0]<x0)x0=p[0]; if(p[0]>x1)x1=p[0]; if(p[1]<z0)z0=p[1]; if(p[1]>z1)z1=p[1]; }
+      spB = { x0: x0-(RIB_OUT+0.2), x1: x1+(RIB_OUT+0.2), z0: z0-(RIB_OUT+0.2), z1: z1+(RIB_OUT+0.2) };
+    }
+    { let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;   // T2v6: the pillar-branch bbox
+      for(const p of BRANCH_PTS){ if(p[0]<x0)x0=p[0]; if(p[0]>x1)x1=p[0]; if(p[1]<z0)z0=p[1]; if(p[1]>z1)z1=p[1]; }
+      brB = { x0: x0-(RIB_OUT+0.2), x1: x1+(RIB_OUT+0.2), z0: z0-(RIB_OUT+0.2), z1: z1+(RIB_OUT+0.2) };
+    }
     /* §31.V8R2D T2 — the on-land assert: every spur sample must clear the
-       local water line by 0.15 m (the old tail waded 2.3 m deep).  Bake-time
-       only (121 samples, once); __SPURDRY is the probe surface for benches. */
+       local water line by 0.15 m (the old tail waded 2.3 m deep).  §31.V8R2E
+       T2 adds the CENTERING assert: the landing's lateral offset from the
+       bridge axis (axisLat, want ~0) and the arrival direction's dot with
+       the walk-out axis (axisDot, want ~1).  Bake-time only; __SPURDRY is
+       the probe surface for benches.                                       */
     { let mn = 1e9, bad = 0;
       for(const p of SPUR_PTS){
         const mg = sampleHeight(p[0], p[1]) - waterLevel(riverField(p[0], p[1]).t);
         if(mg < mn) mn = mg;
         if(mg < 0.15){ bad++; if(bad < 4) console.warn('[V8R2D T2] spur sample in water:', p[0].toFixed(1), p[1].toFixed(1), 'margin', mg.toFixed(2)); }
       }
-      window.__SPURDRY = { min: +mn.toFixed(3), bad };
+      const pe = SPUR_PTS[SPUR_PTS.length-1], pp = SPUR_PTS[SPUR_PTS.length-4];
+      const axisLat = (pe[0]+63)*(-lbUz) + (pe[1]-145)*lbUx;     // lateral of the landing off the axis
+      const sl = Math.hypot(pe[0]-pp[0], pe[1]-pp[1]) || 1;
+      const axisDot = ((pe[0]-pp[0])*(-lbUx) + (pe[1]-pp[1])*(-lbUz)) / sl;  // arrival ∥ walk-out (-dir)
+      if(Math.abs(axisLat) > 0.15 || axisDot < 0.97)
+        console.warn('[V8R2E T2] spur arrival off the bridge axis:', axisLat.toFixed(3), axisDot.toFixed(3));
+      window.__SPURDRY = { min: +mn.toFixed(3), bad, axisLat: +axisLat.toFixed(3), axisDot: +axisDot.toFixed(3) };
     }
-    const lyaw = Math.atan2(CFG.spawn.x - (-63), CFG.spawn.z - 145);
-    lbUx = Math.sin(lyaw); lbUz = Math.cos(lyaw);
     /* §31.V8R2D T1 — the capsule MOVES to the REAL bank run.  V8R2 placed it
        at s 3.8→7.2 believing the landing sat there — that segment is OPEN
        WATER (probed −2.5…−2.2 m vs the waterline; the splat there is already
        bare, so the capsule was a no-op and blades could still rise through
        the buried tail).  The deck meets the bank where the axis march quits:
-       waterline s≈12.6, buried tail to s1w≈16.7 (+0.7 slack) — bare
-       s 11.8→17.4 within the same 1.35 m half-width.                       */
+       waterline s≈12.6, buried tail to s1w≈16.7 (+0.7 slack).
+       §31.V8R2E T2v2 ("Still off-center at the mouth") — the capsule GROWS
+       INLAND to s 25.8, becoming the trail's arrival runway: at this splat
+       raster (WS 2400 / dataRes 512 = 4.7 m texels; SPUR_DF seeds snap to
+       6.25 m cells) the whole spur is ~6 texels and its axis-aligned last
+       leg (17° off the texel grid) pinched out between texel columns — the
+       painted blobs sat wherever seeds snapped, up to ±3 m off the deck
+       line (v8r2e7 plan witness: a stub + one stray dot).  The capsule is
+       ANALYTIC (exact point-to-axis distance, no DF), so the bared runway
+       is straight, continuous and EXACTLY centred on the bridge axis.
+       §31.V8R2E T2v4 — the runway TAPERS: half ~5.2 over the deck landing
+       ("wide path near bridge mouth so no grass on bridge") easing to ~3.3
+       inland, where the wander takes over.  The ridge CLEARING joins the
+       same block below: a bare disc where the spur tops out beside the
+       spawn ("small clearing … at top of ridge"), derived from the SAME
+       axis constants (L-2) — s 52.4 from the bloom, lat +2.5, r 3.6→6.8.  */
     lbAx = -63 + lbUx*11.8; lbAz = 145 + lbUz*11.8;
-    lbL  = 17.4 - 11.8;
+    lbL  = 25.8 - 11.8;
+    clX  = -63 + lbUx*52.4 - lbUz*2.5;
+    clZ  = 145 + lbUz*52.4 + lbUx*2.5;
   }
   /*  §V10B B1b — the S0 gate's crag radius, hoisted once for the mouth fade
       (LAW 2: derived from the routeStations table, never re-typed).         */
@@ -2012,17 +2055,63 @@ function bakeSplat(){
       mask *= lerp(1, 0.42, smoothstep(VILLAGE.r*0.70, VILLAGE.r*0.16, dv));
       const dp = PATH_DF(wx,wz).d;
       mask *= smoothstep(0.7, 2.4, dp);
-      if(SPUR_DF) mask *= smoothstep(0.7, 2.4, SPUR_DF(wx,wz).d);   // §31.V8R2 — the spur bares like the footpath (ragged edge applies below)
+      if(SPUR_DF && wx > spB.x0 && wx < spB.x1 && wz > spB.z0 && wz < spB.z1){
+        /* §31.V8R2 — the spur bares like the footpath (ragged edge applies
+           below); T2v4: analytic distance, see the SPUR_DF note above.
+           T2v5: full-bare 2.4 (> half a 4.7 m splat texel) — 1.4 pinched
+           out on long diagonals between texel columns (f3 ridge witness),
+           the exact lesson the mouth runway taught in T2v2.                */
+        let sq = 1e9;
+        for(const p of SPUR_PTS){ const ddx = wx-p[0], ddz = wz-p[1]; const q = ddx*ddx + ddz*ddz; if(q < sq) sq = q; }
+        mask *= smoothstep(RIB_IN, RIB_OUT, Math.sqrt(sq));
+      }
+      if(SPUR_DF && wx > brB.x0 && wx < brB.x1 && wz > brB.z0 && wz < brB.z1){
+        /* §31.V8R2E T2v6 — the pillar branch: same analytic ribbon, but the
+           bare STRENGTH fades 0.85 → 0 along the run (the V9S-D fading-path
+           idiom) so the trail dissolves into meadow while the crag pillar
+           carries the guidance from there.                                 */
+        let bq = 1e9, bi = 0;
+        for(let n = 0; n < BRANCH_PTS.length; n++){ const p = BRANCH_PTS[n];
+          const ddx = wx-p[0], ddz = wz-p[1]; const q = ddx*ddx + ddz*ddz; if(q < bq){ bq = q; bi = n; } }
+        const bk = 0.85 * Math.pow(1 - bi/(BRANCH_PTS.length-1), 1.15);
+        mask *= 1 - (1 - smoothstep(RIB_IN, RIB_OUT, Math.sqrt(bq))) * bk;
+      }
       if(TRACK){ const tf = TRACK.field(wx,wz); mask *= smoothstep(1.8, 4.6, tf.d); }
       const rag = fbm2(wx*0.085+13.7, wz*0.085-5.3, 3)
                 + noise2(wx*0.27, wz*0.27)*0.35;
       mask = clamp(mask*1.30 - 0.09 + rag*0.20, 0, 1);
       if(SPUR_DF){
         /* §31.V8R2 T1 — the deck's bank footprint is HARD bare (post-rag,
-           the crag-cap idiom): no blade may rise through the stone.        */
+           the crag-cap idiom): no blade may rise through the stone.
+           §31.V8R2E T2v5 ("no grass on bridge please"): blades that leaned
+           over the curbs were ROOTED at lateral 2.2–3.5 m, inside the old
+           feather (full-bare ended at 2.18).  Over the deck landing the
+           hard-bare now reaches 3.4 m with the feather at 5.6 (deck half
+           1.02 + curbs + a 2 m shoulder), tapering inland to the analytic
+           ribbon's own RIB_IN/RIB_OUT (2.4/4.6).  The ridge clearing disc joins below.  */
         const t9 = clamp((wx-lbAx)*lbUx + (wz-lbAz)*lbUz, 0, lbL);
         const dq = Math.hypot(wx-(lbAx+lbUx*t9), wz-(lbAz+lbUz*t9));
-        mask *= smoothstep(1.35, 2.6, dq);
+        const k9 = clamp((t9-5.9)/8.0, 0, 1);
+        /* §31.V8R2E T2v6 ("I still see grass on bridge") — the arithmetic
+           the f7 deckwalk witness forced: blades cull at mask < 0.035
+           (GRASS_VS) sampling the 4.7 m splat texels BILINEARLY, so the
+           ramp from the last zero texel to a grassy neighbour crosses 0.035
+           almost immediately — roots appeared at lat ±0.7–2 right beside
+           the curbs while the "hard 3.4" zone only zeroed ONE texel column.
+           No grass on the bridge means the FLANKING COLUMNS must be zero
+           too: hard-bare 7.0 (deck edge 1.1 + one full texel + margin),
+           feather 9.6, tapering inland to the ribbon's 2.4/4.6.
+           §31.V8R2E T2v7 — the traveller's FAN ("wider as it gets close to
+           the bridge, because some travelers would walk on either side of
+           the bridge down to the river"); T2v8 ("could be more fan shaped")
+           — a true TRUMPET: the flare is a 1.4-power curve over the last
+           5.5 m to the waterline (+2.8 m at the shore, gone by t9 5.5), so
+           the apron reads neck → spreading mouth, not a parallel runway
+           with a bump.  The no-grass-on-bridge floor stays 7.0 through the
+           whole deck landing (the T2v6 flanking-column rule).              */
+        const fan = Math.pow(1 - clamp(t9/5.5, 0, 1), 1.4);
+        mask *= smoothstep(lerp(7.0, RIB_IN, k9) + 2.8*fan, lerp(9.6, RIB_OUT, k9) + 2.8*fan, dq);
+        mask *= smoothstep(3.6, 6.8, Math.hypot(wx-clX, wz-clZ));
       }
       // §W2-C6 — the crag is bare stone on the pillar and its lip (blades at the
       // ragged lip ring read as floating grass over the drop).  smoothstep(36,46):
@@ -2236,33 +2325,82 @@ const PATH_CTRL = [
   [ -212, 152],[ -268, 150],[ -318, 132],[ -352, 104],
 ];
 const PATH_PTS = (()=>{ const a=[]; for(let i=0;i<=420;i++){ const p=catmull(PATH_CTRL,i/420); a.push(p);} return a; })();
-/* §31.V8R2 — the lotus spur: a branch of the same footpath to the stone
-   bridge's landing ("there is a path thru the grass nearby, add a branch to
-   lotus").  Junction on the [-30,96]→[-96,120] leg, a lazy S up the bank.
-   It bares/paints through the SAME splat mask as the footpath — no heightmap
-   touch, and it exists only under ?lotus=1 (L-1: the flagless world stays
-   byte-identical).
-   §31.V8R2D T2 ("nope, goes into river near bridge") — TWO faults fixed.
-   (1) The old tail aimed at (-61.3,139.3): that figure was the WALK-IN POSE
-   6.4 m from the bloom, a point 2.3 m under water — not the shore.  The
-   bridge's own march (the shoreS loop in buildLotusShrine) lands its buried
-   tail at cw0 ≈ (-58.3,129.8), margin +1.4 m (probed).  (2) catmull() maps
-   t so the FIRST and LAST control points are tangent HANDLES, not on-curve
-   (s = t·(n−2)+1): the old 5-point spur actually ENDED at its 4th point —
-   the painted trail stopped at the water's edge pointing into the river.
-   Six points now: the landing IS the last on-curve point, and the end
-   handle turns the arrival tangent into the bridge axis so the last metres
-   face the deck.  Every sample is asserted on land at bake time
-   (window.__SPURDRY, min margin ≥ +0.15).                                   */
+/* §31.V8R2 — the lotus spur.  It bares/paints through the SAME splat mask as
+   the footpath — no heightmap touch, and it exists only under ?lotus=1 (L-1:
+   the flagless world stays byte-identical).  catmull() maps t so the FIRST
+   and LAST control points are tangent HANDLES, not on-curve (s = t·(n−2)+1):
+   the landing IS the last on-curve point, and the water-side end handle
+   keeps the arrival tangent on the bridge axis.  Every sample is asserted on
+   land at bake time (window.__SPURDRY, min margin ≥ +0.15) plus the T2
+   centering asserts (axisLat ~0, axisDot ~1).
+   §31.V8R2E T2v5 ("improrove path, less zigzag, more gentle wandering,
+   winding, natureal the way paths fit with the shape of land"): the probed
+   corridor (/tmp/corridor.js grid) shows a gentle bank to s≈10, a STEEP
+   escarpment s 10–16 (>100 % straight up), easing above.  The first cut
+   swung RIGHT (east) where the step is softest — and vanished from the air
+   under a painterly TREE CLUSTER on that flank (s 14–18, lat +5..+13 —
+   f5 gapclose witness: canopy over the line; the splat probe showed the
+   trail itself baked perfectly, mask 0 the whole run).  A path the player
+   cannot SEE is no invitation, so the wander goes WEST instead — the f2
+   witnesses proved that flank canopy-free: ONE broad lazy S, no wiggles —
+   the straight mouth run (s 0.5/4.5/9 at lat 0, unchanged) eases left to
+   lat −4.5 crossing the escarpment askew (s 13–18), recovers through
+   −3/−1.5 and tops out at s 38.5, lat +0.8 — 1.3 m from the SPAWN, kissing
+   the ridge-clearing disc (s 36.5, lat +2.5).  Control turns ≤ ~37° spaced
+   ≥ 4 m, so catmull renders flowing arcs; ~46 m of path for the 26 m climb
+   — the wander is WHY it reads easy.
+   §31.V8R2E T2v8 ("path shape could be improved, should appear to go
+   stright to lotus, but then out of view from starting point it actualy
+   turns left to pass under the tree, then curves right, then stright down
+   to lotus.  I subtle hint that geting to objects may have have suprises/
+   twists/quests"): the storyteller's shape.  From the spawn the first
+   ~11 m run dead AT the bloom (s 38.5→27.5 near-collinear with the axis —
+   the "straight to lotus" promise), then past the ridge shoulder — out of
+   sight of the start — the path curls LEFT (walker's left = lat+, the east
+   flank) and passes UNDER the painterly tree cluster (canopy proven over
+   s 15.8 lat +5.3 by the f5 gapclose witness; the underpass apex sits at
+   s 15.5 lat +6.0, so the ribbon honestly vanishes beneath the crown for a
+   few metres — the twist made visible), sweeps RIGHT out of the shade and
+   rejoins the axis at s 9 for the straight run home to the mouth.  The
+   escarpment is crossed askew on the tree flank (its softest line — the
+   /tmp/trace.js grade fit wanted exactly this side).  Tail s 9/4.5/0.5/−2
+   unchanged: the landing asserts (axisLat, axisDot) hold verbatim.         */
 const SPUR_CTRL = [
-  [ -76.5, 108.6],[ -71.6, 110.9],[ -67.2, 121.0],[ -63.5, 127.5],
-  [ -57.8, 130.0],[ -58.7, 132.9],
-  /* §31.V8R2D checkpoint ("at river move path to the left, up river, about
-     .5 meter so it centers on the bridge"): arrival + end handle shifted
-     +0.5 m along the axis LEFT/upriver lateral (0.955,0.298) from cw0 —
-     the walked trail now centres on the bridge mouth.  Verify next session. */
+  [ -44.95,  90.50],   // top handle — aims the arrival past the spawn (s 41.5)
+  [ -46.04,  93.31],   // curve top: 1.3 m from the spawn, at the clearing edge (s 38.5, lat +0.8)
+  [ -48.15,  98.41],   // s 33,   lat +0.3 — dead at the bloom (the straight promise)
+  [ -50.08, 103.57],   // s 27.5, lat 0   — still straight, to the ridge shoulder
+  [ -49.62, 109.47],   // s 22,   lat +2.2 — out of view now: the LEFT curl begins
+  [ -48.37, 113.53],   // s 18.5, lat +4.6 — climbing askew on the tree flank
+  [ -47.92, 116.81],   // s 15.5, lat +6.0 — UNDER the tree (the canopy underpass)
+  [ -50.43, 119.48],   // s 12.2, lat +4.4 — curving right, out of the shade
+  [ -53.67, 120.46],   // s 10.3, lat +1.6 — the sweep eases onto the axis
+  [ -55.59, 121.23],   // s 9,  lat 0 — the straight run begins
+  [ -56.93, 125.53],   // s 4.5, lat 0
+  [ -58.12, 129.34],   // s 0.5, lat 0 — the landing (last on-curve point)
+  [ -58.86, 131.73],   // water-side handle (s −2): arrival tangent on-axis
+];
+/* §31.V8R2E T2v6 — the pillar branch ("Should the path also wander off and
+   connect to the pillar?  Giving the player choices, one quick and easy
+   obvious, one farther away unknown risky but with a visual landmark
+   guide.") — YES, in the game's own idiom for hinted routes (the V9S-D
+   desire path: "a gradual fading path"): from the ridge clearing a FAINTER
+   trail strikes out toward the crag pillar's bearing and FADES into meadow
+   after ~26 m.  The lotus path is the obvious easy read; the branch gives
+   the player a direction and lets the pillar itself (always on the skyline)
+   do the guiding — open world with guidance, the risk stays theirs.  Paint
+   only: no dryness stakes (it dies well uphill of the river), lotus-gated
+   like the spur, strength 0.85 at the clearing → 0 at the tip.             */
+const BRANCH_CTRL = [
+  [ -45.00,  95.70],   // handle — the clearing centre
+  [ -41.50,  93.80],   // on-curve start at the clearing's east rim
+  [ -34.00,  89.90],
+  [ -26.50,  85.90],
+  [ -19.50,  82.00],   // the tip: ~26 m out, pointed at the pillar bearing
+  [ -12.50,  78.20],   // handle — continues the line toward the crag
 ];
 const SPUR_PTS = (()=>{ const a=[]; for(let i=0;i<=120;i++){ const p=catmull(SPUR_CTRL,i/120); a.push(p);} return a; })();
+const BRANCH_PTS = (()=>{ const a=[]; for(let i=0;i<=48;i++){ const p=catmull(BRANCH_CTRL,i/48); a.push(p);} return a; })();
 function pathDistance(x,z){
   let best=1e9;
   for(let i=0;i<PATH_PTS.length;i+=3){
@@ -6283,9 +6421,12 @@ ${lotus ? `
   }
 ${lotus ? `
   if(vM > 6.5 && vM < 7.5){                 // §30.6 V8R — petal silk: warm shade, never stone-grey
+    /* §31.V8R2E "more like petals, less like granite": granite is read from
+       GREY shade bands — silk shade stays warm and luminous (petals pass
+       light; stone swallows it).  Warm mixes up, shade floor lifted.       */
     lit = base*1.14;
-    mid = mix(base*0.82, vec3(1.0, 0.90, 0.72)*0.55, 0.14);
-    shd = mix(base*0.55, vec3(1.0, 0.78, 0.55)*0.42, 0.30);
+    mid = mix(base*0.84, vec3(1.0, 0.90, 0.72)*0.55, 0.26);
+    shd = mix(base*0.60, vec3(1.0, 0.78, 0.55)*0.42, 0.42);
     rim = 0.52;
   }
   /* §31.V8R2D T1 — "not steady, learn from the walls": the walls read stable
@@ -9625,9 +9766,9 @@ class Walker {
         const dx=this.pos.x-LOTUS.cw0.x, dz=this.pos.z-LOTUS.cw0.z;
         if(dx*dx+dz*dz<400) hintOnce('lotusBridge', 'a stone bridge arcs out to it');
       }
-      /* §30.7 V8-T6 — 'stepped inside the light': standing in the doorway's
-         glow (the threshold OBB — the shrine room itself is knee-high to a
-         walker, so the light pool on the steps IS the inside).  Earns the
+      /* §30.7 V8-T6 — 'stepped inside the light': standing in the firebox
+         glow (the threshold OBB — the tōrō is solid stone, T1v4, so the
+         light pool on the steps IS the inside).  Earns the
          fullest ring, E3+B3+E4.                                            */
       if(LOTUS !== null && this._lotusD2 < 46){
         const dx=this.pos.x-LOTUS.thresh.x, dz=this.pos.z-LOTUS.thresh.z;
@@ -11727,9 +11868,11 @@ let cloudShRT=null, cloudShMat=null, lifeGroup=null;
 
 /*──────────────── §L1/§30 — the floating lotus temple (?lotus=1) ───────────
    A ~14 m stone lotus floating mid-river at (-63, 145): three tiers of nine
-   curved petal shells (the Delhi Lotus Temple's language), a golden Thai
-   mondop with a tiered spire nestled in its heart, one grand glowing
-   doorway facing spawn.  BATCH V8 made it a DESTINATION: walkable pads +
+   curved petal shells (the Delhi Lotus Temple's language) cradling a great
+   stone tōrō — the crag lamp()'s five-part recipe at monument scale (stepped
+   base → plinth → shaft → glowing firebox cube → cap ladder → jewel spire;
+   §31.V8R2E T1v4 replaced the earlier walk-in mondop house: solid, doorless).
+   BATCH V8 made it a DESTINATION: walkable pads +
    solids (§30.2), the lily-pad causeway (§30.3), bell + reeds (§30.4),
    bob/sway/ripples/fireflies (§30.5), the Lantern Bloom (§30.6) and the
    incense thermal + FIRSTS (§30.7).  Gated default-off (?lotus=0 and any
@@ -11743,7 +11886,7 @@ function buildLotusShrine(){
   const M = PB();
 
   /* ── placement (world units): a HOUSE-SIZED lotus floating on the pond, the
-     golden mondop nestled inside.  Authored in sculpture-local units (roughly
+     stone tōrō standing in its heart.  Authored in sculpture-local units (roughly
      "cm", scaled by S).  V8R verdict "could be bigger 20% to give more room
      for walking": S 0.55 → 0.66 — drum, steps, cup and petals all grow from
      this ONE number (L-2; pads/solids/thresh/spire derive below).  Base
@@ -11754,7 +11897,9 @@ function buildLotusShrine(){
      local y=0 plane exactly at the water surface so the cup kisses it.       */
   const rf = riverField(bx, bz);
   const floatY = waterLevel(rf.t);
-  /* yaw so the open shrine door faces back toward the spawn point.          */
+  /* yaw so the landing/threshold axis faces back toward the spawn point
+     (T1v4: the tōrō is doorless — the yaw aims the bridge walk-out, the
+     petal az-gap and the 'lotusIn' threshold at the spawn).                */
   const yaw = Math.atan2(CFG.spawn.x - bx, CFG.spawn.z - bz);
   const ca = Math.cos(yaw), sa = Math.sin(yaw);
   /* local→world: scale, rotate by yaw, translate to the float plane.        */
@@ -11811,7 +11956,7 @@ function buildLotusShrine(){
      drift petal-to-petal, deterministic in the azimuth (no rng, L-2).     */
   function petalShell(baseR, height, lean, width, curl, col, o){
     o = o || {};
-    const tipCol = o.tip || [1.00, 0.80, 0.76];
+    const tipCol = o.tip || [1.00, 0.72, 0.74];   // §31.V8R2E: clear rose (was the faintest 0.80,0.76 kiss — verdict "more like petals, less like granite")
     const vanCol = o.van || [1.00, 0.855, 0.55];
     const vanK   = o.vanK   === undefined ? 1 : o.vanK;
     const blushK = o.blushK === undefined ? 1 : o.blushK;
@@ -11866,9 +12011,14 @@ function buildLotusShrine(){
           const nl=Math.hypot(nx,ny,nz)||1;
           nrow.push([nx/nl, ny/nl, nz/nl]);
           /* V8R colour: vanilla at the base flowing up the midrib → ivory
-             body → the faintest rose kiss on the tip fringe only.          */
+             body → the rose blush on the tip fringe.  §31.V8R2E ("lotus
+             petals should look more like petals, less like granite"): the
+             blush GROWS — a real sacred lotus is white with PINK-tipped
+             petals, the pink strongest at the very tip and edges, feathering
+             down into the ivory body.  The gradient is the flower tell no
+             stone has.                                                     */
           const van   = Math.pow(1-t, 1.35) * (0.45 + 0.55*(1-Math.abs(u))) * vanP;
-          const blush = Math.pow(t, 2.4) * (0.15 + 0.55*Math.abs(u)) * 0.45 * blushK;
+          const blush = Math.pow(t, 2.0) * (0.50 + 0.50*Math.abs(u)) * 0.90 * blushK;
           const lit = (1.0 + (1-Math.abs(u))*0.05) * tone;
           let cr = col[0] + (vanCol[0]-col[0])*van;
           let cg = col[1] + (vanCol[1]-col[1])*van;
@@ -11900,9 +12050,9 @@ function buildLotusShrine(){
 
   /* three tiers, staggered so the seams never align (the full-bloom overlap).
      The lotus is MUCH LARGER than the temple — a grand ~14 m open bloom that
-     cradles the ~house-sized mondop in its heart, the way a real lotus cups
-     its seed-pod.  Broad shallow scoops lying nearly flat; a door-facing gap
-     in the inner ring shows the glow.                                      */
+     cradles the stone tōrō in its heart, the way a real lotus cups its
+     seed-pod.  Broad shallow scoops lying nearly flat; a spawn-facing gap
+     in the inner ring shows the firebox glow.                              */
   const tiers=[
     { n:9, rot:rotCube, baseR:4.6, height:4.4, lean:6.6, width:4.6, curl:0.5, col:ivory   },  // outer: broad, flung nearly flat
     { n:9, rot:0,       baseR:3.7, height:3.7, lean:4.8, width:4.2, curl:0.7, col:ivoryHi },  // mid: fills the outer gaps
@@ -11941,23 +12091,17 @@ function buildLotusShrine(){
   PCYL([0, 0.12,0],[0, 0.34,0], 4.97, 4.86, 22, [0.74,0.72,0.62], 0, false, false);// damp meniscus band (the swell's reach)
   PCYL([0, 0.34,0],[0, 0.55,0], 4.86, 4.60, 22, marble, 0, false, true);           // dry marble, above the swell
 
-  /* ── the mondop temple (square plan) on the cup, door facing +Z(local).
-     HOUSE scale and PROUD: ~2.9 m footprint, doorway ~2.4 m tall, finial at
-     ~5 m — rising well clear of the low petal collar so the temple reads as
-     the luminous heart of the open bloom.
-     §31.V8R2D T3 ("nope, look at other lantern, learn, improve. Simplify."):
-     rebuilt in the language of the game's OWN stone tōrō (the village/summit
-     5-part recipe: stone base → shaft → CONTAINED light-box → wide square-set
-     cap → jewel).  Changes from V8R2: the gold family and its six sills/
-     lintels are GONE (stone carries the form; the ONE gold accent left is
-     the finial = the tōrō jewel), the whole-wall panes shrink to framed
-     embers stopped by a deep stone spandrel brow (ONE clear glow per face —
-     the tōrō firebox), and the cap slabs lose the k*0.5 pinwheel rotation
-     (a tōrō cap is square-set).  Stone = the bridge's own granite on mat 8
-     (the T1 steady-stone path): bridge and lantern are one carved family.
-     Everything the COLLISION/pads/ROOFS read is untouched: base slab sizes,
-     the ±1.85 pillar planes, the wall planes, the roof-slab y/w ladder (the
-     third top face stays local 7.8 = the roof perch), the spire tip 9.4.   */
+  /* ── the great tōrō (square plan) on the cup — §31.V8R2E T1v4.
+     The mondop HOUSE is gone ("lantern not ok" ×3: a walk-in room with a
+     door reads as a hut with glowing signs, never as a lantern).  This is
+     the crag lamp()'s five-part recipe VERBATIM at monument scale — stepped
+     base → plinth → narrow solid shaft → ONE glowing firebox cube → square
+     cap ladder → jewel spire.  Solid stone: no door, no room, no interior.
+     Stone = the bridge's own granite on mat 8 (the T1 steady-stone path):
+     bridge and lantern are one carved family.  The stair pads, the ROOFS
+     perch (third cap slab top face = local 7.8) and the spire tip 9.4 are
+     UNCHANGED; collision is rebuilt below from the new plinth footprint
+     (§W2: collision derives from the same local numbers as geometry).     */
   const granL   = [0.400, 0.386, 0.362];   // the bridge's gran/granHi literals
   const granLHi = [0.460, 0.445, 0.415];
   /* stepped square base — stone, not gold (the walkable stair pads below
@@ -11966,33 +12110,25 @@ function buildLotusShrine(){
     const w = 5.2 - k*0.85;
     PBOX(0, 2.0 + k*0.5, 0, w/2, 0.25, w/2, 0, k===1?granLHi:granL, 8);
   }
-  /* corner columns — the shaft stage; +Z front pair frames the entrance */
-  for(const [cx,cz] of [[-1.85,-1.85],[1.85,-1.85],[-1.85,1.85],[1.85,1.85]]){
-    PBOX(cx, 4.5, cz, 0.38, 1.6, 0.38, 0, granLHi, 8);
-  }
-  /* the light-box: ONE contained pane per closed face, sill tucked under the
-     glowing floor line, a stone spandrel brow above (the tōrō firebox read).
-     Collision keeps the old wall planes: the light still stops the walker
-     (the 'lotusIn' law — the solids below are untouched).                  */
-  PBOX(0, 4.28, -1.78, 1.47, 0.90, 0.06, 0, glow, 2);   // back pane
-  PBOX(-1.78, 4.28, 0, 0.06, 0.90, 1.47, 0, glow, 2);   // left pane
-  PBOX( 1.78, 4.28, 0, 0.06, 0.90, 1.47, 0, glow, 2);   // right pane
-  PBOX(0, 5.62, -1.84, 1.60, 0.44, 0.10, 0, granL, 8);  // back spandrel brow
-  PBOX(-1.84, 5.62, 0, 0.10, 0.44, 1.60, 0, granL, 8);  // left spandrel
-  PBOX( 1.84, 5.62, 0, 0.10, 0.44, 1.60, 0, granL, 8);  // right spandrel
-  PBOX(0, 5.62, 1.84, 1.60, 0.44, 0.10, 0, granL, 8);   // door-face spandrel
-  /* glowing interior floor + a seated figure as the glow's source */
-  PBOX(0, 3.4, 0, 1.66, 0.12, 1.66, 0, glow, 2);
-  PCYL([0,3.6,0],[0,4.9,0], 0.78, 0.18, 8, glow, 2, true, true);   // seated cone
-  /* the open doorway itself emits warm light so it reads even in shadow */
-  PBOX(0, 4.19, 1.86, 1.05, 0.99, 0.05, 0, glow, 2);
-  PBOX(-1.26, 4.19, 1.85, 0.21, 0.99, 0.08, 0, granLHi, 8);  // door jambs: stone
-  PBOX( 1.26, 4.19, 1.85, 0.21, 0.99, 0.08, 0, granLHi, 8);  // closes the slit to the pillars
-  /* the cap: three square-set shrinking stone slabs (same y/w ladder — the
-     third's top face IS the roof perch, local 7.8) + the one gold accent  */
+  /* the tōrō body — three stages between the stair top (3.25) and the cap
+     ladder (bottom 6.6), the crag lamp's own proportions blown up:
+       plinth  half 1.75, y 3.25..3.85 — a 4th, tallest base course; ALSO
+               the collision footprint (walkers stand on the 2nd/3rd steps;
+               no head ever reaches under the firebox overhang);
+       shaft   half 0.85, y 3.85..5.25 — the narrow solid post (the neck is
+               what makes it read LANTERN, not house; crag shaft:box 0.55);
+       firebox half 1.62, y 5.15..6.55 — ONE glowing cube, proud of the
+               shaft on every side (crag box:cap 0.74 → 1.62 : 2.5 cap),
+               tucked 0.10 into the shaft top and 0.05 under the cap.       */
+  PBOX(0, 3.55, 0, 1.75, 0.30, 1.75, 0, granLHi, 8);   // plinth
+  PBOX(0, 4.55, 0, 0.85, 0.70, 0.85, 0, granL,   8);   // shaft
+  PBOX(0, 5.85, 0, 1.62, 0.70, 1.62, 0, glow,    2);   // firebox — the light
+  /* the cap: three square-set shrinking stone slabs, stacked touching and
+     lifted over the firebox head (T1v2) — same widths, and the third slab's
+     top face IS the roof perch, local 7.8, exactly as before.              */
   for(let k=0;k<3;k++){
     const w = 5.0 - k*1.05;
-    PBOX(0, 6.3 + k*0.62, 0, w/2, 0.26, w/2, 0, k===1?granLHi:granL, 8);
+    PBOX(0, 6.8 + k*0.4, 0, w/2, 0.20, w/2, 0, k===1?granLHi:granL, 8);
   }
   PCYL([0,7.80,0],[0,9.4,0], 0.46, 0.04, 4, goldHi, 1, true, true); // finial spire (the tōrō jewel; tip 9.4 = the straddle perch)
 
@@ -12002,27 +12138,21 @@ function buildLotusShrine(){
   /*── §30.2 V8-T1 — the place, in the player's hands ──────────────────────
      Collision + walkable surfaces, registered from the SAME local numbers as
      the geometry above (the §W2 "collision can never drift" rule), through
-     the same LW/S/yaw transform.  Solids follow the teahouse pattern (walls
-     block, the doorway stays open); walkable tops join lotusTopAt's pad list
-     (the deck idiom) — solids alone cannot carry a walker.
-     The mondop's shrine room is ~1.45 m tall (floor local 3.46 → wall top
-     6.1, ×S) — a shrine, not a hall: no walker fits inside, so ONE interior
-     block keeps heads out of the roof slabs and the invisible boundary sits
-     just BEHIND the glowing door plate — you are stopped by the light
-     itself, standing on the steps in the glow (the 'lotusIn' moment).      */
-  const SOLID_TOP = floatY + 6.1*S;              // walls + columns top (local 6.1)
+     the same LW/S/yaw transform.  §31.V8R2E T1v4: the tōrō is SOLID — one
+     square column on the plinth footprint (half 1.75 = the 4th base course)
+     replaces the mondop's walls/columns/room block.  The walker climbs the
+     stair pads and is stopped by the stone itself, standing on the steps in
+     the firebox glow overhead — the 'lotusIn' threshold zone (below) is
+     unchanged.  Top = the firebox top (local 6.55); the cap ladder and the
+     spire live above any walker.                                           */
+  const SOLID_TOP = floatY + 6.55*S;             // plinth→firebox column top
   const lotusSolid = (cx, cz, hx, hz, top)=>{
     const [wx,,wz] = LW(cx, 0, cz);
     pushSolid(wx, wz, hx*S, hz*S, yaw, top);
     return { s: SOLIDS[SOLIDS.length-1], base: top };
   };
   const lSolids = [];
-  lSolids.push(lotusSolid(0, -1.9, 2.1, 0.22, SOLID_TOP));        // back wall
-  lSolids.push(lotusSolid(-1.9, 0, 0.22, 1.68, SOLID_TOP));       // left wall
-  lSolids.push(lotusSolid( 1.9, 0, 0.22, 1.68, SOLID_TOP));       // right wall
-  lSolids.push(lotusSolid(-1.85, 1.85, 0.38, 0.38, SOLID_TOP));   // front column L
-  lSolids.push(lotusSolid( 1.85, 1.85, 0.38, 0.38, SOLID_TOP));   // front column R
-  lSolids.push(lotusSolid(0, 0, 1.66, 1.66, SOLID_TOP));          // shrine room block (figure + glow floor live inside)
+  lSolids.push(lotusSolid(0, 0, 1.75, 1.75, SOLID_TOP));          // the tōrō column (plinth footprint)
   /* spire ridge joins the perch-surface family — the straddle-perch code
      (§W2-C3 roofRidgeAt) reuses with zero changes.  Top = the third roof
      slab's upper face (local 7.54 + 0.26).                                  */
@@ -12253,6 +12383,27 @@ function buildLotusShrine(){
     LOTUS.cw0 = { x: bx + dirX*(bS1+0.5), z: bz + dirZ*(bS1+0.5) };
     const mid = (bS0 + bS1 + EXT)/2;
     LOTUS.cwC = { x: bx + dirX*mid, z: bz + dirZ*mid, rr: Math.pow((bS1+EXT-bS0)/2 + 3.5, 2) };
+    /* §31.V8R2E T2v7 — the HOME cairn ("a small distinctive landmark/
+       reference point so player recognizes and can return to their starting
+       point"): the crag trailhead/summit cairns' own 4-stone stacked-pbox
+       recipe (V7R4-B3 — "one story across the whole climb"), scaled ×1.35,
+       planted on the ridge clearing's rim at the FORK where the lotus path
+       tops out and the pillar branch strikes off — the first thing the
+       player stands beside, the thing they look for coming home.  Marker,
+       not obstacle (§W2-C6): no SOLID.  World-static in M2 (the bank does
+       not bob).                                                            */
+    {
+      const cx9 = -43.2, cz9 = 95.0;
+      const cy9 = sampleHeight(cx9, cz9);
+      const cols9 = [granHi, gran, granHi, gran];
+      const stones9 = [[0.30,0.14,0.26,0.3],[0.22,0.11,0.20,1.1],[0.16,0.09,0.15,0.6],[0.11,0.07,0.10,1.4]];
+      let y9 = cy9 - 0.04;                       // toe bedded into the turf (L-8)
+      for(let i=0;i<stones9.length;i++){
+        const s9 = stones9[i];
+        pbox(M2, cx9, y9 + s9[1]*1.35, cz9, s9[0]*1.35, s9[1]*1.35, s9[2]*1.35, s9[3], cols9[i%4], 8);
+        y9 += s9[1]*1.35*1.7;
+      }
+    }
   }
   const gPads = finishPainted(M2);
   /* static water furniture: NO sway VS (a stone arc must never lean with the
