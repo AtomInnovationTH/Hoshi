@@ -151,6 +151,17 @@
   @keyframes obnod{0%,100%{transform:none}30%{transform:translateX(-7px)}60%{transform:translateX(6px)}}
   @keyframes obpulse{0%,100%{opacity:.3}50%{opacity:.95}}
   #ob .obPulse{animation:obpulse 1.7s ease-in-out infinite}
+  /* §M4 T0 — the completion flash: one felt pulse when a card's witness lands
+     (the advance is already earned; this is presentation only). */
+  #obCard.ok{animation:obok .45s ease-out}
+  @keyframes obok{0%{box-shadow:0 0 0 0 rgba(246,236,216,0)}
+    35%{box-shadow:0 0 26px 2px rgba(246,236,216,.55);border-color:rgba(246,236,216,.65)}
+    100%{box-shadow:0 0 0 0 rgba(246,236,216,0)}}
+  /* §M4 — the quest chip: ONE quiet line, bottom, pure DOM; display driven by
+     the WINGS module only, so desktop never shows a pixel of it. */
+  #chip{display:none;position:fixed;left:0;right:0;bottom:calc(30px + env(safe-area-inset-bottom));
+    z-index:22;text-align:center;pointer-events:none;font-size:12.5px;letter-spacing:.06em;
+    color:var(--cream);opacity:.55;text-shadow:0 1px 8px rgba(10,14,20,.8)}
   #hud.ob #keys{display:none}   /* the lesson owns the teaching — the key hints wait */
   @media (pointer:coarse){
     body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
@@ -243,6 +254,7 @@
 <div id="flash"></div>
 <div id="toast"></div>
 <div id="ob"><div id="obCard"><div id="obArt"></div><div id="obTxt"></div><div id="obDots"></div></div></div>
+<div id="chip"></div>
 <div id="touchUI">
   <button id="tFly" type="button">fly</button>
   <button id="tPause" type="button">pause</button>
@@ -657,6 +669,7 @@ uniform sampler2D uShadowMap;
 uniform sampler2D uCloudSh;   // baked cloud-shadow coverage
 uniform vec2  uCloudShOrigin;
 uniform vec2  uShadowC;      // centre of the sun shadow map, world xz
+uniform float uShadowCull;   // §T6 - depth casters beyond this world-xz radius are culled (one owner: SHADOW_CULL_R)
 uniform vec4  uCull;         // xy = view direction on the ground, z = cos(half angle)
 uniform vec2  uWindLag;      // mean wind direction x the response-lag distance
 uniform mat4  uLightMat;
@@ -666,6 +679,8 @@ uniform float uCloudAmount;
 uniform float uFogMul;
 uniform float uTreeCalm;   // §W1-A1 — 1 = retire sub-pixel tree micro-motion with distance
 uniform float uTreeStill;  // §25.11 — 1 = continuous LOD comp + angular motion fades + wind-origin snap
+uniform float uCrown2;     // §31.WALL S2 — 1 = near-lens dither-fade of tree geometry (<0.6 m): no hollow-shell x-ray
+uniform vec2  uTreeKill;   // §31.STEADY S3v2 — the metre-keyed oscillator kill band [start, end] m: (60,110) under treekill (default), (120,150) = the §31.WALL S3 literals
 uniform float uRain2;      // §W1-A3 — 1 = the reworked streaks (0 restores the old spin+shape)
 uniform float uRainbow;    // §W1-B4 — sunlit-rain bow strength, driven from State._wet
 `;
@@ -822,6 +837,7 @@ float sunShadowFast(vec3 wp, vec3 nrm, float ndl){
   if(pc.z > 0.9995) return 1.0;
   vec2 e = abs(pc.xy - 0.5);
   float fade = 1.0 - smoothstep(0.40, 0.497, max(e.x, e.y));
+  fade *= 1.0 - smoothstep(uShadowCull - 50.0, uShadowCull, distance(wp.xz, uShadowC));
   if(fade <= 0.001) return 1.0;
   float bias = mix(mix(0.0026, 0.0006, clamp(ndl,0.0,1.0)),
                    mix(0.0008, 0.00018, clamp(ndl,0.0,1.0)), uBiasFix);
@@ -839,6 +855,7 @@ float sunShadow(vec3 wp, vec3 nrm, float ndl){
   if(pc.z > 0.9995) return 1.0;
   vec2 e = abs(pc.xy - 0.5);
   float fade = 1.0 - smoothstep(0.40, 0.497, max(e.x, e.y));
+  fade *= 1.0 - smoothstep(uShadowCull - 50.0, uShadowCull, distance(wp.xz, uShadowC));
   if(fade <= 0.001) return 1.0;
   float bias = mix(mix(0.0022, 0.00045, clamp(ndl,0.0,1.0)),
                    mix(0.0006, 0.00012, clamp(ndl,0.0,1.0)), uBiasFix);
@@ -2178,35 +2195,40 @@ function bakeSplat(){
         const CCc = window.__CRAGCAP;   // §29.1 T0.1: consume CRAG_POS; §36S: route2 reads CRAG_ROUTE (LAW 2)
         if(State.route2){ const rc = CRAG_ROUTE.eval(wx, wz, CRAG_POS.x, CRAG_POS.z, CCc.capH, CCc.skirtBase, 0); if(rc) pcut = rc.cut; }
         else { const pc = CRAG_PATH.eval(wx, wz, CRAG_POS.x, CRAG_POS.z, CCc.capH, CCc.skirtBase); if(pc) pcut = pc.cut; }
-        /*  §V10B B1b (checkpoint-2 verdicts, both rim3-gated so ?rim3=0
-            re-bakes the V9S-P splat byte-identically):
+        /*  §V10B B1b — the checkpoint-2 verdicts, with the MISMATCH MOW now
+            UNGATED (a defect fix on an accepted system: grass floated at
+            the pillar bases).  bench/v9sp/fieldhash hashes the height
+            textures only, so no rung moves; the ?rim3=0 splat byte-identity
+            promise is SUPERSEDED by this fix (a deliberate, logged event).
+            The mouth fade STAYS rim3-gated; ?rim3=0 replays the V9S-P field
+            for everything except the mow.
             (a) THE MOUTH FADE — "dirt→grass at the lower torii could be
             smoother": the trodden-earth mask eases out over ~7 m of crag
             radius beyond the S0 gate, so the tread grows out of meadow and
             hands the line to the desire path instead of switching off.
             (b) THE MISMATCH MOW — "grass floating ~10 cm on the lower
             cliff": blades root on the 2.34 m FIELD while the eye sees the
-            analytic mesh; where the two surfaces disagree ≥0.25 m the
+            analytic mesh; where the two surfaces disagree ≥0.10 m the
             blades retire (the V8S corridor-mow lesson, generalised to the
             whole d 13–34 band — rim3 columns made the disagreement wider). */
         if(State.rim3){
           if(pcut > 0 && _s0r9 > 0 && dcrag > _s0r9 - 0.5)
             pcut *= 1 - smoothstep(_s0r9 - 0.5, _s0r9 + 6.5, dcrag);
-          if(dcrag > 13 && dcrag < 34){
-            const dh9 = Math.abs(cragFrozenAt(wx, wz, CCc.capH, CCc.skirtBase) - h);
-            mask *= 1 - smoothstep(0.25, 0.60, dh9);
-            /*  §V10B B1c — the 60° ceiling (checkpoint-2b: "no grass on
-                vertical or near vertical, maybe limit to 60 degrees"): the
-                FIELD normal used by the legacy slope gates is texel-blurred
-                and under-reads the analytic wall, so blades survived on the
-                steeps.  Gate on the EQUATION's own gradient: fade from 45°
-                (g 1.0), gone by 60° (g 1.73).                               */
-            const e9 = 0.5;
-            const g9 = Math.hypot(
-              cragFrozenAt(wx + e9, wz, CCc.capH, CCc.skirtBase) - cragFrozenAt(wx - e9, wz, CCc.capH, CCc.skirtBase),
-              cragFrozenAt(wx, wz + e9, CCc.capH, CCc.skirtBase) - cragFrozenAt(wx, wz - e9, CCc.capH, CCc.skirtBase)) / (2*e9);
-            mask *= 1 - smoothstep(1.0, 1.73, g9);
-          }
+        }
+        if(dcrag > 13 && dcrag < 34){
+          const dh9 = Math.abs(cragFrozenAt(wx, wz, CCc.capH, CCc.skirtBase) - h);
+          mask *= 1 - smoothstep(0.10, 0.35, dh9);
+          /*  §V10B B1c — the 60° ceiling (checkpoint-2b: "no grass on
+              vertical or near vertical, maybe limit to 60 degrees"): the
+              FIELD normal used by the legacy slope gates is texel-blurred
+              and under-reads the analytic wall, so blades survived on the
+              steeps.  Gate on the EQUATION's own gradient: fade from 45°
+              (g 1.0), gone by 60° (g 1.73).                               */
+          const e9 = 0.5;
+          const g9 = Math.hypot(
+            cragFrozenAt(wx + e9, wz, CCc.capH, CCc.skirtBase) - cragFrozenAt(wx - e9, wz, CCc.capH, CCc.skirtBase),
+            cragFrozenAt(wx, wz + e9, CCc.capH, CCc.skirtBase) - cragFrozenAt(wx, wz - e9, CCc.capH, CCc.skirtBase)) / (2*e9);
+          mask *= 1 - smoothstep(1.0, 1.73, g9);
         }
       }
         if(pcut > 0) mask = lerp(mask, 0.02, pcut);
@@ -4157,6 +4179,42 @@ function buildBladeInstances(geom, chunkSize, count, seed){
   return geom;
 }
 
+/*  §31.STEADY W3 — THE KEPT VILLAGE: a signed-distance map of the village's
+    kept ground (buildVillage's `kept` discs = SOLID footprints + the lane
+    ribbon), 256² R8 at ~1.3 m/texel over the village bbox, sampled ONCE per
+    blade vertex (a 4th fetch issued beside the meadow/height/wind reads — its
+    latency overlaps theirs).  Texel = clamp((d + 6)/32) with d = metres outside
+    the nearest disc (negative inside); the pad guarantees the border texels
+    read ≥ 16 m, so clamp-to-edge outside the rect decodes to "wild meadow"
+    and no branch is needed.  The per-blade hash fray in the VS breaks the
+    texel grid (the sandō-mow lesson: a texel cannot carry the edge alone).
+    Boot sets KEPT after buildVillage and before the grass builds; ?kept=0
+    leaves it null and the grass shader emits byte-identically.             */
+let KEPT = null;
+function buildKeptMap(discs){
+  const N = 256, pad = 16;
+  let x0=1e9, x1=-1e9, z0=1e9, z1=-1e9;
+  for(const d of discs){ x0=Math.min(x0,d[0]-d[2]); x1=Math.max(x1,d[0]+d[2]); z0=Math.min(z0,d[1]-d[2]); z1=Math.max(z1,d[1]+d[2]); }
+  x0-=pad; z0-=pad; x1+=pad; z1+=pad;
+  const size = Math.max(x1-x0, z1-z0);
+  const data = new Uint8Array(N*N);
+  for(let j=0;j<N;j++){
+    const wz = z0 + (j+0.5)/N*size;
+    for(let i=0;i<N;i++){
+      const wx = x0 + (i+0.5)/N*size;
+      let md = 1e9;
+      for(const d of discs){ const q = Math.hypot(wx-d[0], wz-d[1]) - d[2]; if(q < md) md = q; }
+      data[j*N+i] = Math.round(clamp((md + 6)/32, 0, 1)*255);
+    }
+  }
+  const tex = new THREE.DataTexture(data, N, N, THREE.RedFormat, THREE.UnsignedByteType);
+  tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.needsUpdate = true;
+  return { tex, rect: new THREE.Vector4(x0, z0, 1/size, 0), n: discs.length, size };
+}
+
 /*  `depthOnly` builds the variant used by the prepass.  It solves the identical
     blade — it has to, or the depth it lays down would not match — but it emits
     no varyings and skips the curved cross-section normal, the AO, the occlusion
@@ -4170,7 +4228,8 @@ uniform float uChunkSize;
 uniform vec4  uLod;            // near, nearWidth, far, farWidth
 uniform vec3  uLodB;           // widthBoost(angular), heightScale, ringDistance
 uniform float uWindGain;
-uniform float uPlayerPush;
+uniform float uPlayerPush;${(State.kept && KEPT) ? `
+uniform sampler2D uKept; uniform vec4 uKeptRect;   // §31.STEADY W3 — the kept-village distance map (x0, z0, 1/size)` : ''}
   ${GL_HASH}${GL_NOISE}${GL_TERRAIN}${GL_WIND}
   in vec2 iPos;
 ${ depthOnly ? '' : `
@@ -4270,7 +4329,17 @@ void main(){
   /*  §27-V5 — uCragSink retired: the cragmesh now owns the base out to 59.5 m,
       so blades root on the frozen field = the mesh surface; no sink needed.
       ?cragmesh=0 byte-identical preserved (the value was already 0).        */
-  vec4  Wsam   = windSample(wxz - uWindLag);
+  vec4  Wsam   = windSample(wxz - uWindLag);${(State.kept && KEPT) ? `
+  // §31.STEADY W3 — the kept-village read.  The CHUNK gate rides modelMatrix[2][2] (0.5 = this chunk
+  // can reach the farmland, set on the CPU per frame): a uniform test, so far chunks pay nothing;
+  // inside it, only blades < 240 m of the village centre fetch — the paired drive A/B at the ref
+  // poses (400 m out) must read ~0 cost.  kRaw = 1.0 decodes to "wild" (mdK = 26).
+  float dvK  = 9.0e9;
+  float kRaw = 1.0;
+  if(modelMatrix[2][2] < 0.75){
+    dvK = distance(wxz, vec2(${VILLAGE.x.toFixed(1)}, ${VILLAGE.z.toFixed(1)}));
+    if(dvK < 240.0) kRaw = textureLod(uKept, (wxz - uKeptRect.xy)*uKeptRect.z, 0.0).r;
+  }` : ''}
   // §W1-A1b/d — the trees' sub-pixel law applies to blades too.  The quiver
   // terms (ringing 2–3 Hz, flutter 4–8 Hz) are 2–4 cm — sub-pixel past ~30 m,
   // pure alias across the whole 100–1000 m band the user reported: retire them
@@ -4424,7 +4493,35 @@ ${State.route2 ? (() => { const D = ROUTE_DESIRE;
     float mDp = (1.0 - smoothstep(wDp*0.4, wDp, dD + (hash12(wxz*1.73 + 3.1) - 0.5)*0.55)) * sDp;
     mask *= 1.0 - 0.85*mDp;${State.rim3 ? `
     fade *= 1.0 - 0.55*mDp;` : ''}
-  }`; })() : ``}
+  }`; })() : ``}${(State.kept && KEPT) ? `
+  /*  §31.STEADY W3 — THE KEPT VILLAGE.  kRaw decodes to metres outside the
+      nearest kept disc (house/inn/barn/tower footprint, or the lane ribbon).
+      Three rings, multiplied: the FARMLAND (the terrain paint's own field
+      parcels — the SAME 230→120 m reach as its 'farm' mask, LAW 2) carries a
+      sward at 0.62; the YARD (≤ ~4.5 m out, fraying to the parcels by ~11 m)
+      a further 0.68 (= 0.42 total); the WALL STRIP (≤ ~0.5 m out, gone by
+      2 m) is trodden — a further 0.55 (= 0.23) and a thinner sward, so a
+      plinth reads as a plinth with tufts (LAW 8), never a plinth in hay.  The
+      fray is per blade (hash + 8 m noise), so no texel or disc edge is ever a
+      line.  Why all three: a lit pane below ~1.5 m glowing THROUGH chest-high
+      blades is the "few windows still jittering" (the veil, not the candle —
+      W3 witness); the yard clears the blades at the wall, the farmland clears
+      the tips in front of an eye standing anywhere in the settlement (the
+      foreground tips 1–4 m out are what cross a downhill pane's bottom edge).
+      The wild meadow beyond the parcels is untouched; ?kept=0 emits none of
+      this.  COST: the block runs only inside dvK < 240 m (a coherent per-chunk
+      branch); the fray is one hash12 (the 8 m pn2 wander was dropped — the
+      paired drive A/B read the unconditional version at ~+0.9 ms/frame).      */
+  float keptH = 1.0;
+  if(dvK < 240.0){
+    float mdK   = kRaw*32.0 - 6.0;
+    float frayK = (hash12(wxz*1.37 + 9.1) - 0.5)*2.4;
+    float farmK = smoothstep(230.0, 120.0, dvK);
+    float yardK = 1.0 - smoothstep(4.5, 11.0, mdK + frayK);
+    float wallK = 1.0 - smoothstep(0.5, 2.0, mdK + frayK*0.5);
+    keptH = mix(1.0, 0.62, farmK) * mix(1.0, 0.68, yardK) * mix(1.0, 0.55, wallK);
+    mask *= mix(1.0, 0.70, wallK);
+  }` : ''}
   if(mask < 0.035){ degenerate(); return; }
   float thr  = bladeKeep*(0.78 + 0.22*mask);
   float grow = clamp((thr - need) / max(thr*0.22, 1e-5), 0.0, 1.0);
@@ -4449,7 +4546,8 @@ ${State.route2 ? (() => { const D = ROUTE_DESIRE;
   hgt *= 0.68 + 0.74*clumpB;
   hgt *= 0.84 + 0.38*clumpA;
   hgt *= mix(1.24, 0.82, dryv);          // dry shoulders carry a shorter sward
-  hgt *= mix(0.68, 1.0, mask);
+  hgt *= mix(0.68, 1.0, mask);${(State.kept && KEPT) ? `
+  hgt *= keptH;                          // §31.STEADY W3 — the kept village (farmland 0.62 · yard ×0.68 · wall strip ×0.55)` : ''}
   hgt *= uLodB.y;
   hgt  = max(hgt, 0.08);
 
@@ -4766,6 +4864,8 @@ class GrassField {
         uLodB:      { value:new THREE.Vector3(0.0011*R.wpx, R.hs, R.dn) },
         uWindGain:  { value:0.235 },
         uPlayerPush:{ value: li===0 ? 1.0 : 0.0 },
+        uKept:      { value: KEPT ? KEPT.tex : null },            // §31.STEADY W3 — declared in the VS only when State.kept && KEPT (unused otherwise)
+        uKeptRect:  { value: KEPT ? KEPT.rect : new THREE.Vector4(0,0,0,0) },
       });
       // ONE material for the whole ring: three then sorts its chunks by depth
       // (same material id -> sort falls through to z), giving front-to-back
@@ -4905,6 +5005,14 @@ class GrassField {
         m.position.set(cx, gy, cz);
         m.scale.x = fc;
         m.scale.y = dens;
+        /*  §31.STEADY W3 — the Z scale rides the kept-village CHUNK gate the same
+            way: 0.5 = this chunk can reach the farmland (< 240 m of the village
+            centre, chunk half-diagonal included), 1 = it cannot, so the VS skips
+            the kept read + maths on a uniform test instead of per-vertex ALU
+            (the paired drive A/B read the per-vertex gate at +0.27 ms/frame at
+            the ref poses).  Both values ≤ 1: three's bounding sphere is untouched.
+            ?kept=0 ⇒ KEPT null ⇒ z stays 1 = today's matrix byte-for-byte.     */
+        m.scale.z = (State.kept && KEPT && Math.hypot(cx - VILLAGE.x, cz - VILLAGE.z) - cs*0.75 < 240) ? 0.5 : 1;
       }
       this.drawnPerRing[li] = rDrawn;
       this.coverage[li] = rCover / (W*H);
@@ -5250,28 +5358,28 @@ function makeTree(kind, detail, seed){
     // det0 clumps are literally a subset of det2's — shape stays across re-bins
     const pts=[], rad=[];
     for(let i=0;i<=6;i++){ const u=i/6; pts.push([Math.sin(u*2.1)*0.35*u*H*0.06, u*H, Math.cos(u*1.7)*0.3*u*H*0.06]);
-      rad.push(lerp(H*0.035, H*0.006, u)); }
+      rad.push(lerp(H*TRUNK_RF[kind], H*0.006, u)); }
     addTube(M, pts, rad, trunkSeg, 0.0);
     const TI=[]; for(let i=0;i<6;i++){ const u=0.30 + 0.68*(i/5);
       TI.push({ u, rr:(1-u)*H*0.30 + H*0.05, hue:0.15+r()*0.7 }); }
-    const PICK = detail>=1 ? [0,1,2,3,4,5] : [0,2,3,5];
+    const PICK = [0,1,2,3,4,5];
     for(const i of PICK){ const {u,rr,hue}=TI[i];
       addClump(M, 0, u*H + H*0.04, 0, rr, rr*0.36, rr, seed+i*13, hue, Math.max(0,detail-1)); }
   } else if(kind==='poplar'){
     const pts=[], rad=[];
     for(let i=0;i<=7;i++){ const u=i/7; pts.push([Math.sin(u*3.0)*0.5, u*H, Math.cos(u*2.2)*0.45]);
-      rad.push(lerp(H*0.028, H*0.005, u)); }
+      rad.push(lerp(H*TRUNK_RF[kind], H*0.005, u)); }
     addTube(M, pts, rad, trunkSeg, 0.0);
     const PP=[]; for(let i=0;i<9;i++){ const u=0.20 + 0.78*(i/8);
       PP.push({ u, rr:H*(0.17 - 0.08*Math.abs(u-0.55)*1.4), hue:0.2+r()*0.7 }); }
-    const PICK = detail>=1 ? [0,1,2,3,4,5,6,7,8] : [0,2,4,6,8];
+    const PICK = [0,1,2,3,4,5,6,7,8];
     for(const i of PICK){ const {u,rr,hue}=PP[i];
       addClump(M, Math.sin(u*7)*0.5, u*H, Math.cos(u*6)*0.45, rr*0.9, rr*1.35, rr*0.9,
                seed+i*29, hue, Math.max(0,detail-1)); }
   } else if(kind==='willow'){
     const pts=[], rad=[];
     for(let i=0;i<=5;i++){ const u=i/5; pts.push([u*u*1.7, u*H*0.72, Math.sin(u*2)*0.6]);
-      rad.push(lerp(H*0.05, H*0.012, u)); }
+      rad.push(lerp(H*TRUNK_RF[kind], H*0.012, u)); }
     addTube(M, pts, rad, trunkSeg, 0.0);
     // §T3b: ALL 12 scatter params drawn once; detail emits a prefix, and the
     // trailing curtains only appear at det>=1 (they would collapse into the stem)
@@ -5281,11 +5389,11 @@ function makeTree(kind, detail, seed){
                 cy:H*0.62 + (r()-0.3)*H*0.22, rr:H*(0.13+r()*0.09),
                 hue:0.5+r()*0.5, hue2:0.6+r()*0.4 });
     }
-    const n = detail>=1 ? 12 : 6;
+    const n = 12;
     for(let i=0;i<n;i++){ const {cx,cy,cz,rr,hue,hue2}=WC[i];
       addClump(M, cx, cy, cz, rr*1.15, rr*0.8, rr*1.15, seed+i*37, hue, Math.max(0,detail-1));
       // trailing curtain
-      if(detail>=1) addClump(M, cx*1.05, cy-rr*1.5, cz*1.05, rr*0.55, rr*1.5, rr*0.55,
+      addClump(M, cx*1.05, cy-rr*1.5, cz*1.05, rr*0.55, rr*1.5, rr*0.55,
                              seed+i*41, hue2, Math.max(0,detail-1));
     }
   } else { // broadleaf: the camphor / oak silhouette
@@ -5293,12 +5401,17 @@ function makeTree(kind, detail, seed){
     const lean=(r()-0.5)*0.5;
     for(let i=0;i<=6;i++){ const u=i/6;
       pts.push([lean*u*u*H*0.14 + Math.sin(u*3.4)*0.35, u*H*0.52, Math.cos(u*2.6)*0.35]);
-      rad.push(lerp(H*0.062, H*0.026, u)); }
+      rad.push(lerp(H*TRUNK_RF[kind], H*0.026, u)); }
     addTube(M, pts, rad, trunkSeg, 0.0);
     // §T3b branches: params for ALL 5 (angles use the FIXED max count so layouts
     // match across details), then emit the detail's count as a prefix
     const BP=[]; for(let i=0;i<5;i++) BP.push({ a:i/5*TAU + r()*0.9, bl:H*(0.26+r()*0.16) });
-    const nb = detail>=2?5:(detail>=1?4:0);
+    /* §31.WALL S3 — det0 branch tubes := det1's 4 (was 0): the surviving
+       silhouette delta at the 508–532 det1↔det0 swap was det0's MISSING
+       branches (clump counts equal since T6).  BP angles use the fixed max
+       count, so det0's 4 are the SAME branches det1 draws — no layout shift.
+       Analytic cost ≈ +80k far tris, logged as smoothness-card (6.0) debt.  */
+    const nb = (detail>=2 || State.lod3) ? 5 : 4;
     for(let i=0;i<nb;i++){ const {a,bl}=BP[i];
       const bp=[], br=[];
       for(let j=0;j<=3;j++){ const u=j/3;
@@ -5316,9 +5429,23 @@ function makeTree(kind, detail, seed){
                   cy:H*0.74 + (r()-0.44)*CR*0.95 - dd*0.20,
                   rr:CR*(0.26+r()*0.26), hue:r() }); }
     }
-    const n = detail>=2?22:(detail>=1?12:7);
+    /* §31.STEADY2 S3v3b (flag `lod3`) — "tree size pop from far to mid persists":
+       measured on the geometry (/tmp/lodfoot.js, 12 azimuths): det1 (12 clumps,
+       4 branches) drawn at ×1.04 read 65.6 m² against det2's 74.1 m² — 13 % of
+       area, 6 % of size, outline XOR 16 % — so every tree GREW as the eye crossed
+       150 m, in flight constantly.  Every detail now carries all 22 clumps and
+       all 5 branches, and at the default lod3=2 the mid level's clumps sit at
+       the near level's tessellation, so the 150 m swap changes trunk segments
+       only (outline XOR 16 % → 0.4 %); the L0→L1 lobe step moves out to the
+       508–532 m line (9 % on a ~33 px crown).  TREE_COMP is re-measured per
+       level.  Cost at spawn: +737k tris, +0.4 ms mean at the bench config
+       (paired ABBA drive; card 6.0 debt).  ?lod3=1 = 22 clumps at the mid
+       level's own tessellation (+218k tris, XOR 8.8 %) · ?lod3=0 = the
+       12-clump det0/det1 meshes + [1.04, 1.04, 1.0] exactly.                */
+    const n = (detail>=2 || State.lod3) ? 22 : 12;
+    const tess = (State.lod3 >= 2 && detail === 1) ? 1 : Math.max(0,detail-1);   // lod3=2: the mid level's clumps at the near level's tessellation
     for(let i=0;i<n;i++){ const c=CP[i];
-      addClump(M, c.cx,c.cy,c.cz, c.rr*1.12, c.rr*0.86, c.rr*1.12, seed+i*53, c.hue, Math.max(0,detail-1)); }
+      addClump(M, c.cx,c.cy,c.cz, c.rr*1.12, c.rr*0.86, c.rr*1.12, seed+i*53, c.hue, tess); }
   }
   return M;
 }
@@ -5396,13 +5523,32 @@ void main(){
      LARGER angular size (ratio 12 -> 8, i.e. the fade begins ~33% closer for a
      given tree height), so the 90-210 m band's slowly-beginning calm kicks in a
      tick earlier.  Off (uTreeStill=0) restores the metre-keyed window exactly. */
-  float fm0 = (uTreeStill > 0.5) ? 1.0 - smoothstep(8.0, 56.0, _d/max(H, 3.0))
+  float fm0 = (uTreeStill > 0.5) ? 1.0 - smoothstep(8.0, 30.0, _d/max(H, 3.0))
                                  : 1.0 - smoothstep(110.0, 520.0, _d);
   // V7R2-C2 — the widened window keeps a small motion residual out into the mid
   // band; damp that residual to 70% (exact 1.0 at the near knee, 0.0 at the far
   // knee, ~0.65 mid) so slow trees read as slower, never frozen-then-popped.
   // Tune C2_RESID (0.7 here; 1.0 = previous round's envelope).
-  float mfade = mix(1.0, (uTreeStill > 0.5) ? fm0*(1.0 - 0.7*(1.0 - fm0)) : fm0, uTreeCalm);
+  /* §31.WALL S3 — the metre-keyed kill: the angular fade above leaves a 12 m
+     tree in FULL sway inside ~96 m and ~30% residual to ~360 m — the mid-range
+     shimmer the human still read after T5.  Multiply the on-path branch to 0
+     by 150 m so ALL oscillators (trunk f0, clump cph, flutter flut) stop; the
+     quasi-static wind lean (spd*0.052, outside mfade) survives — far trees
+     still lean with the weather, they no longer tremble.  Lives INSIDE the
+     uTreeStill>0.5 operand: ?treestill=0 byte-identical BY CONSTRUCTION.    */
+  /*  §31.STEADY S3v2 — the kill band is now uTreeKill (default (60,110) under
+      flag treekill; ?treekill=0 ⇒ (120,150) = the S3 literals, same arithmetic).
+      Verdict "still tremble" / "flying + mid-distance", bisected at a pinned
+      flying pose: the only ANIMATED mover left at 30–120 m is this oscillator
+      family (quiver f1 0.7–1.1 Hz, flutter, trunk f0) — shadows, clouds and the
+      wind field bisected null; the far kill at 150 m is doing its job.  So the
+      kill moves inward: full motion to 60 m, none past 110 m; the quasi-static
+      lean survives everywhere.  (The OTHER mover in flight — clump silhouettes
+      re-rasterizing under camera motion, 6.9 %/1.3 % of mid-crown pixels per
+      flight frame, MSAA 4 already on, unchanged by every animated system and by
+      shading-contrast levers (≤ 10 %) — is not a steady-world lever: it needs
+      temporal AA or supersampling, logged to the smoothness card.)          */
+  float mfade = mix(1.0, (uTreeStill > 0.5) ? fm0*(1.0 - 0.7*(1.0 - fm0))*(1.0 - smoothstep(uTreeKill.x, uTreeKill.y, _d)) : fm0, uTreeCalm);
   float rot = iVar.x, ph = iVar.z;
   float c = cos(rot), s = sin(rot);
   vec3 lp  = position * sc;
@@ -5417,7 +5563,7 @@ void main(){
      snaps the global origin to), so a 90-210 m tree reads a field locked to
      its own grid instead of the sub-texel re-sample drift that shimmers it. */
   if(uTreeStill > 0.5){
-    float bandSnap = smoothstep(80.0, 100.0, _d) * (1.0 - smoothstep(200.0, 220.0, _d));
+    float bandSnap = smoothstep(80.0, 100.0, _d) * (1.0 - smoothstep(500.0, 540.0, _d));
     wsP = mix(wsP, (floor(wsP/uWindTexel) + 0.5)*uWindTexel, bandSnap);
   }
   vec4 W = windSample(wsP);
@@ -5427,14 +5573,20 @@ void main(){
   // swings 0.05→2.3 every few seconds and rocks EACH far crown's lean by a
   // pixel or two — the shimmer.  Blend the sample toward the steady mean
   // with distance (same mfade gate): far trees hold a constant wind-lean,
-  // still leaning, just no longer breathing.
-  vec2 wv = mix(W.rg, uMeanWind*1.05, mix(1.0, (uTreeStill > 0.5 ? smoothstep(35.0, 75.0, _d/max(H, 3.0)) : smoothstep(320.0, 700.0, _d)), uTreeCalm)) * prof;
+  // still leaning, just no longer breathing.${/* §31.STEADY2 S3v3a (rides flag treekill; a JS
+     comment inside the template so ?treekill=0 emits the 1c GLSL source byte-for-byte): the
+     human's word — "trees don't need to move in the wind at a mid and long distance".  With every
+     oscillator dead past the kill band, the one time-varying term left there was this lean's LIVE
+     wind sample (the 16–30 H blend reaches the steady mean only at 190–360 m for a 12 m tree).
+     The lean now settles to the steady mean across the same 60→110 m band: past it a tree holds
+     one lean, and whatever still moves there is the eye, not the wind. */''}
+  vec2 wv = mix(W.rg, uMeanWind*1.05, mix(1.0, (uTreeStill > 0.5 ? ${State.treekill ? 'max(smoothstep(16.0, 30.0, _d/max(H, 3.0)), smoothstep(uTreeKill.x, uTreeKill.y, _d))' : 'smoothstep(16.0, 30.0, _d/max(H, 3.0))'} : smoothstep(320.0, 700.0, _d)), uTreeCalm)) * prof;
   float gust = W.b, exc = W.a;
   /* §V7R4-A2 — scale wind amplitude ×0.6 in the 90-210 m band (smoothly keyed,
      treestill only), so the residual crown motion the angle fade cannot reach
      drops below the shimmer threshold without ever freezing the crown.
      Off (uTreeStill=0): ampMid is exactly 1.0 and the multiplies are no-ops. */
-  float ampMid = (uTreeStill > 0.5) ? mix(1.0, 0.6, smoothstep(72.0, 92.0, _d)*(1.0 - smoothstep(208.0, 228.0, _d))) : 1.0;
+  float ampMid = (uTreeStill > 0.5) ? mix(1.0, 0.6, smoothstep(72.0, 92.0, _d)*(1.0 - smoothstep(480.0, 560.0, _d))) : 1.0;
   wv *= ampMid; gust *= ampMid; exc *= ampMid;
   float spd = length(wv);
 
@@ -5482,6 +5634,19 @@ in vec3 vW; in vec3 vN; in float vHue; in float vLeaf; in float vDist;
 in float vY; in float vAO;
 out vec4 outColor;
 void main(){
+  /* §31.WALL S2 — the near-lens fade (flag crown2): the eye may legally sit
+     inside edge/mid foliage (the three-zones verdict), but a clump shell that
+     meets the 0.12 near plane resolves to ONE flat facet filling the frame —
+     the "hollow crown" read.  Fragments within 0.6 m of the eye thin out by a
+     screen-space ordered dither (fully gone at 0.15 m), so the next leaf
+     layer shows through: leaves at the lens, never a wall.  Radial distance,
+     not view depth, so the radius is the same off-axis.  uCrown2 = 0 ⇒ the
+     test is dead code and the frame is byte-identical (?crown2=0 escape).   */
+  if(uCrown2 > 0.5){
+    float dEye = length(uCamPos - vW);
+    float fade = 1.0 - smoothstep(0.15, 0.6, dEye);
+    if(fade > hash12(floor(gl_FragCoord.xy))) discard;
+  }
   vec3 N = normalize(vN);
   vec3 V = normalize(uCamPos - vW);
   vec3 lit, mid, shd; float trans, rim;
@@ -5506,6 +5671,26 @@ void main(){
   float moss = smoothstep(0.15, -0.5, N.y) * (pn2(vW.xz*1.6 + vW.y)*0.5+0.5);
   shd = mix(shd, ${C.moss}*0.55, moss*0.35*(1.0-vLeaf));
 
+  /* §31.WALL S2 (crown2, part 2) — INNER faces read as the shaded underside of
+     the foliage, never a hollow shell.  DoubleSide already draws the backface,
+     but it was lit as the outer skin: from inside a crown a lens-filling clump
+     wall flooded with the transmission colour (cTrans, measured [207,166,53])
+     — the "seeing thru to the inside" x-ray.  Flip N toward the eye (honest
+     sun/rim), pull the palette toward the shade greens with a grain break-up,
+     transmission ×0.35 (a little sun still bleeds through a leaf underside —
+     a void is as wrong as a flood), rim ×0.5, ambient 0.75.  Together with
+     the near-lens dither above: at the lens leaves thin to specks, past them a
+     shaded, grainy green interior.  uCrown2 = 0 ⇒ untouched.                */
+  float ambient = 1.0;
+  if(uCrown2 > 0.5 && !gl_FrontFacing){
+    N = -N;
+    float g2 = pn2(vW.xz*2.3 + vW.y*1.9)*0.5+0.5;
+    lit = mix(lit, mix(${C.cMid}, ${C.cShade}, g2), 0.7);
+    mid = mix(mid, mix(${C.cShade}, ${C.cDeep}, g2*0.6), 0.6);
+    shd = mix(shd, ${C.cDeep}, 0.4);
+    trans *= 0.35; rim *= 0.5; ambient = 0.75;
+  }
+
   float ndl = dot(N, uSunDir);
   float sh = sunShadow(vW, N, ndl) * cloudShadow(vW);
   Surf s;
@@ -5513,7 +5698,7 @@ void main(){
   s.soft = mix(0.09, 0.20, clamp(vDist*0.004,0.0,1.0));
   s.jit = (vn2(vW.xz*3.9 + vW.y*1.7) - 0.5)*0.055;
   s.shadow = sh; s.trans = trans; s.transCol = ${C.cTrans};
-  s.rim = rim; s.ao = vAO; s.ambient = 1.0;
+  s.rim = rim; s.ao = vAO; s.ambient = ambient;
   vec3 col = paint(s);
   col = aerial(col, vDist, V, vW.y);
   outColor = vec4(SAFE3(col), gFogAmt);
@@ -6230,6 +6415,17 @@ function pv(M,x,y,z,nx,ny,nz,c,m){
 function pq(M,a,b,c,d){ M.idx.push(a,b,c, a,c,d); }
 function pt3(M,a,b,c){ M.idx.push(a,b,c); }
 function rotY(x,z,ca,sa){ return [x*ca - z*sa, x*sa + z*ca]; }
+/*  §31.WALL W2 — ONE owner for the lit-pane material id.  A mat-2 emitter's
+    candle flick phase is the FRACTION of its mat id (PAINTED_FS: fract(vM)*2.5
+    turns); T8 gave the village windows a STATELESS per-pane phase — a pure
+    function of pane position (LAW 2), no rng, no state.  Every other mat-2
+    emitter (the tōrō firebox, shrine + crag lantern light-boxes, the irori
+    hearth core) still wrote a bare 2 ⇒ phase 0 ⇒ they all pulsed in lockstep
+    ("Some pulse in sync").  Same hash, same 0.4 span, used by all of them.   */
+function paneMat2(x, z){
+  const ph = ((Math.sin(x*12.9898 + z*78.233)*43758.5453) % 1 + 1) % 1;
+  return 2 + ph*0.4;
+}
 
 function pbox(M, cx,cy,cz, hx,hy,hz, yaw, col, mat){
   const ca=Math.cos(yaw), sa=Math.sin(yaw);
@@ -6374,7 +6570,7 @@ ${lotus ? `  /* §30.6 V8R — petals are SILK, not plaster: the mineral speckle
   float rim = 0.30, ao = 1.0;
 
   if(vM > 1.5 && vM < 2.5){                 // lit window
-    float flick = 0.94 + 0.06*sin(uTime*2.1 + vW.x*3.1 + vW.z*1.7);
+    float flick = 0.96 + 0.04*sin(uTime*2.1 + fract(vM)*2.5*6.2831853);
 ${lotus ? `
     /* §30.6 V8-T5 — the Lantern Bloom: the door/floor glow GROWS past 150 m
        instead of shrinking into the dusk — a lantern on dark water from
@@ -6505,6 +6701,7 @@ function buildVillage(){
   const roofCols=[LC('roofA'), LC('roofB'), LC('roofSlate'), LC('thatch')];
   const wallCols=[LC('wallA'), LC('wallB'), tint(LC('wallA'),0.94)];
   const houses=[];
+  const lanePts=[];   // §31.STEADY W3 — the lane centreline, exported for the kept map (no 4th copy of the formula)
 
   // a lane winding up the slope, houses hung off it
   const laneN = 44;
@@ -6514,6 +6711,7 @@ function buildVillage(){
     const rr = 34 + u*118;
     const lx = VILLAGE.x + Math.cos(a)*rr*0.85;
     const lz = VILLAGE.z + Math.sin(a)*rr*0.62 - u*38;
+    lanePts.push([lx, lz]);
     for(let k=0;k<2;k++){
       if(r()<0.24) continue;
       const off = (k?1:-1)*(9 + r()*8);
@@ -6546,14 +6744,45 @@ function buildVillage(){
     if(r()<0.55) smokers.push({x:h.x+chx, y:chY+0.9*h.s, z:h.z+chz, rate:0.5+r()*0.8});
     // windows, warm at golden hour
     const nw = 2 + (r()*3|0);
+    /*  §31.STEADY2 W4 (flag `panez`) — "black jittering in the windows": every
+        pane of a house sits at the SAME wall offset, so two windows whose
+        footprints overlap share one exact plane and z-fight (the dark pane
+        wins pixels over the lit one as the eye moves = black speckle in the
+        glow).  A wall now holds no overlapping panes: the later window's
+        r() draws are still taken (the 8080 stream is untouched), only its
+        pbox is skipped when a placed pane on the same side lies within
+        0.62·s along and 0.76·s up (pane half-extents 0.30·s / 0.38·s).  The
+        pane also sits 0.11 proud (was 0.06): the door (0.10) and the framing
+        posts (0.08) are then ≥ 6 cm behind its face instead of 1–3 cm.
+        ?panez=0 = the 1c geometry byte-for-byte.                            */
+    const proud = State.panez ? 0.11 : 0.06;
+    const placed = [];   // [side, along, lvl] of every pane this house holds
     for(let i=0;i<nw;i++){
       const side = r()<0.5?1:-1;
       const along = (r()-0.5)*w*0.7;
-      const [wx,wz]=rotY(along, side*(d/2+0.06), Math.cos(h.yaw), Math.sin(h.yaw));
-      const lvl = r()<0.6 ? y0+ht*0.42 : y0+ht*0.78;
+      const [wx,wz]=rotY(along, side*(d/2+proud), Math.cos(h.yaw), Math.sin(h.yaw));
+      /*  §31.STEADY W3 (flag `sill`) — the low row's sill was 0.42·ht above a
+          floor sunk 0.5 m: 0.17–0.7 m above the outside ground, an ankle
+          window (LAW 12: an impossible read) and exactly the band the wall
+          tufts still reach.  Lift the sill to ≥ 0.55 m above the house ground;
+          where a small house cannot hold two rows (the lifted row would touch
+          the upper row), that window joins the upper row instead — a hut has
+          one row.  Same r() draw, so the 8080 stream is untouched.          */
+      const upC = y0+ht*0.78;
+      let lvl = r()<0.6 ? y0+ht*0.42 : upC;
+      if(State.sill && lvl < upC){
+        const lift = Math.max(lvl, h.y + 0.55 + 0.38*h.s);
+        lvl = (lift + 0.81*h.s > upC) ? upC : lift;
+      }
       const on = r()<0.5;
+      if(State.panez){
+        let clash = false;
+        for(const p of placed){ if(p[0]===side && Math.abs(p[1]-along) < 0.62*h.s && Math.abs(p[2]-lvl) < 0.76*h.s){ clash = true; break; } }
+        if(clash) continue;   // every r() above is already drawn; only the box is dropped
+        placed.push([side, along, lvl]);
+      }
       pbox(M, h.x+wx, lvl, h.z+wz, 0.30*h.s, 0.38*h.s, 0.05, h.yaw,
-           on?LC('windowGlow'):tint(LC('timber'),0.6), on?2:3);
+           on?LC('windowGlow'):tint(LC('timber'),0.6), on ? paneMat2(h.x+wx, h.z+wz) : 3);   // T8 stateless phase; W2: one owner (paneMat2)
     }
     // timber framing on a few of them
     if(r()<0.4){
@@ -6768,7 +6997,7 @@ function buildVillage(){
       const gy=sampleHeight(gx,gz), st=tint(LC('sB'),0.9+r2()*0.15);
       pbox(M, gx, gy+0.12, gz, 0.30, 0.12, 0.30, pathYaw, st, 0);                     // base
       pbox(M, gx, gy+0.55, gz, 0.11, 0.33, 0.11, pathYaw, st, 0);                     // shaft
-      pbox(M, gx, gy+0.95, gz, 0.20, 0.15, 0.20, pathYaw, tint(LC('windowGlow'),0.9), 2); // light-box
+      pbox(M, gx, gy+0.95, gz, 0.20, 0.15, 0.20, pathYaw, tint(LC('windowGlow'),0.9), paneMat2(gx, gz)); // light-box (W2: own phase)
       pbox(M, gx, gy+1.16, gz, 0.27, 0.05, 0.27, pathYaw, st, 0);                     // cap
       pbox(M, gx, gy+1.25, gz, 0.12, 0.07, 0.12, pathYaw, st, 0);                     // jewel
     }
@@ -6828,7 +7057,7 @@ function buildVillage(){
       for(let i=0;i<6;i++){ const an=i/6*TAU;
         pbox(M, ix+hx2+Math.cos(an)*0.33, iy+0.12, iz+hz2+Math.sin(an)*0.33, 0.14, 0.09, 0.10, an+1.5708,
              [LC('sA'),LC('sB'),LC('sD')][(r3()*3)|0], 0); }
-      pbox(M, ix+hx2, iy+0.10, iz+hz2, 0.15, 0.05, 0.15, iyaw, tint(LC('windowGlow'),0.85), 2); }
+      pbox(M, ix+hx2, iy+0.10, iz+hz2, 0.15, 0.05, 0.15, iyaw, tint(LC('windowGlow'),0.85), paneMat2(ix+hx2, iz+hz2)); }   // W2: the hearth's own phase
     INN_OBB = { x:ix, z:iz, hx:3.25, hz:2.25, ca:ica, sa:isa };
     window.__INN_OBB = INN_OBB;   // debug mirror (the __BR idiom) — C5 witness control poses
     INN_HEARTH = { x:ix, y:iy+4.05, z:iz };   // the wisp rises from the roof ridge
@@ -6901,7 +7130,26 @@ function buildVillage(){
     const k = 0.74 + 0.26*clamp((M.pos[i*3+1] - gy)/2.4, 0, 1);
     M.col[i*3]*=k; M.col[i*3+1]*=k; M.col[i*3+2]*=k;
   }
-  return { geom:finishPainted(M), smokers:smokers.filter(Boolean), mill };
+  /*  §31.STEADY W3 — THE KEPT VILLAGE (data-only export; the grass VS consumes
+      it through buildKeptMap()).  Verdict trail: T8 → W2 → "a few windows still
+      jittering" / "Nearby houses".  Measured (pinned-pose witness, 2026-09-03):
+      a lit pane below ~1.5 m is seen THROUGH the chest-high blades between the
+      eye and the wall — the glow slivers between blade tips re-shuffle on every
+      gust and every sub-pixel eye move and the bloom halo pulses with them
+      (5 mm eye move: 106 changed px at the pane, 6 with grass hidden; 1.5 s of
+      wind: 429 strong px, 0 with grass hidden; the same house's clear upper
+      pane: ≤ 4).  Not a depth fight (the plan's guess — the quantum is ~1 mm
+      at 20 m) and not the candle.  A lived-in village keeps its ground: every
+      SOLID inside the village radius (houses, inn, barn, tower, gate, well —
+      the collision set is the ONE owner of "what stands here") becomes a disc
+      of its footprint radius and the lane points a trodden ribbon; the grass VS
+      shortens blades in the yards and at the walls (see GRASS_VS 'kept').  No
+      rng, no state; the 8080/8081 streams are untouched.  ?kept=0 ⇒ null map
+      ⇒ the grass shader is emitted byte-identically.                        */
+  const kept = SOLIDS.filter(s => Math.hypot(s.x-VILLAGE.x, s.z-VILLAGE.z) < VILLAGE.r*1.25)
+                     .map(s => [s.x, s.z, Math.hypot(s.hx, s.hz)]);
+  for(const p of lanePts) kept.push([p[0], p[1], 1.5]);   // the lane: a 1.5 m ribbon → trodden to ~±3.5 m, short sward to the fences
+  return { geom:finishPainted(M), smokers:smokers.filter(Boolean), mill, kept };
 }
 
 /*──────────────── the walkable world: ground, deck, parapets ───────────────*/
@@ -7014,6 +7262,13 @@ function collideWalk(x, z, curY, radius){
     sd = sd < 0 ? -BR_HW : BR_HW;
     x = BRIDGE.x + BR.ax[0]*al + BR.pp[0]*sd;
     z = BRIDGE.z + BR.ax[1]*al + BR.pp[1]*sd;
+  }
+  if(State.solid2){
+    // §31.STEADY2 trunk bonk ("A trunk let me through"): the flight call (radius 1.2) now tests
+    // trunks too — the §T7d wall response (eject + into-face velocity kill, spin at speed) applies
+    // to a bole at ANY steering/spin/fold state; canopyAt's core zone still adds its consequence
+    const tr = trunkPush(x, z, curY, radius, radius >= 1);
+    x = tr[0]; z = tr[1];
   }
   _res[0]=x; _res[1]=z; return _res;
 }
@@ -7755,6 +8010,7 @@ function buildCragPines(){
   const fol = [LC('cMid'), LC('cLit'), tint(LC('cVarA'), 1.05), LC('cVarB'),
                tint(LC('cMid'), 1.08), LC('cVarC'), tint(LC('cLit'), 0.94)];
   let n = 0;
+  const PINE_TRUNK_R = 0.11;   // T3 — ONE owner of the planted pine trunk radius (the pcyl + the trunk solid)
   for(const [azDeg, r, s, yaw0, ci] of SPOTS){
     const az = azDeg*Math.PI/180;
     const x = cx + Math.cos(az)*r, z = cz + Math.sin(az)*r;
@@ -7777,6 +8033,10 @@ function buildCragPines(){
         for(const rr of [rT, rT*1.3])
           wall = Math.max(wall, gY(x + Math.cos(a9)*rr, z + Math.sin(a9)*rr) - y0); }
       if(wall > 0) continue; }
+      /*  T3 — the planted pine's trunk is solid on foot (R6: per PLANTED pine,
+          6-8, never "8").  Tagged trunk so microLiftAt skips it (a lift bump
+          within 30 m of each pine would break air.js).  ?solid2=0 = none.   */
+      if(State.solid2){ pushSolid(x, z, PINE_TRUNK_R, PINE_TRUNK_R, 0, g + 2.5); SOLIDS[SOLIDS.length-1].trunk = true; }
     /*  §B3 rev2 (human: "pine trees look square! this isn't minecraft") — the
         pbox tiers are gone: a pine is now a leaning trunk + THREE stacked
         tapered CONES (7-gon pcyl skirts, bottom-capped so the up-look never
@@ -7787,7 +8047,7 @@ function buildCragPines(){
         ladder 0.80/0.56/0.32, crown LIFTED 0.20H→0.30H with 0.30H tiers
         (bare trunk now shows below the canopy — a mature pine, not a bush),
         trunk top raised 0.60H→0.70H to fill the lifted crown.               */
-    pcyl(M, [x, g - 0.15, z], [x + 0.06*s, g + 0.70*H, z + 0.04*s], 0.11, 0.09, 5,
+    pcyl(M, [x, g - 0.15, z], [x + 0.06*s, g + 0.70*H, z + 0.04*s], PINE_TRUNK_R, 0.09, 5,
          (ci & 1) ? tint(LC('trunkLit'), 1.02) : tint(LC('trunkShade'), 1.08), 5, false, false);
     /*  rev2b (witness: mixed palette entries per tier read as navy/lime
         STRIPES — a traffic cone, not a pine).  ONE foliage hue per tree;
@@ -8014,7 +8274,7 @@ function buildSummitShrine(){
       dreg('lantern'+li+'_base', g.x, g.y + 0.12, g.z, 0.12);
       pbox(M, g.x, g.y + 0.55, g.z, 0.11, 0.33, 0.11, 0, st, 0);                        // shaft
       dreg('lantern'+li+'_shaft', g.x, g.y + 0.55, g.z, 0.33);
-      pbox(M, g.x, g.y + 0.95, g.z, 0.20, 0.15, 0.20, 0, tint(LC('windowGlow'),0.9), 2); // light-box
+      pbox(M, g.x, g.y + 0.95, g.z, 0.20, 0.15, 0.20, 0, tint(LC('windowGlow'),0.9), paneMat2(g.x, g.z)); // light-box (W2: own phase)
       dreg('lantern'+li+'_box', g.x, g.y + 0.95, g.z, 0.15);
       pbox(M, g.x, g.y + 1.16, g.z, 0.27, 0.05, 0.27, 0, st, 0);                        // cap
       dreg('lantern'+li+'_cap', g.x, g.y + 1.16, g.z, 0.05);
@@ -9291,20 +9551,24 @@ let CANOPY = null;
 let ROOFS = [];   // §W2 — house ridge perch surfaces {x,z,ca,sa,hl,top}, built in buildVillage
 const CROWN = { broadleaf:[11.5,0.74,0.46], pine:[14.5,0.60,0.32],
                 poplar:[15.0,0.55,0.26],   willow:[9.5,0.62,0.52] };  // [H, cyFrac, rFrac]
+const CANOPY_ZONE = { edge:0.67, core:0.33 };   // §T3: crown-radius thirds — edge rf>edge, middle core<=rf<=edge, core rf<core (or a trunk)
+const TRUNK_RF = { broadleaf:0.062, pine:0.035, poplar:0.028, willow:0.05 };   // T3 — ONE owner of the trunk base radius (makeTree reads it)
+function trunkR(kind, scale){ return CROWN[kind][0]*TRUNK_RF[kind]*scale; }     // T3/T4 — the bole radius at a tree's scale (CROWN's nominal H)
 function canopyKey(cx,cz){ return ((cx+512)<<10)|(cz+512); }
 function buildCanopy(){
   CANOPY = new Map();
   for(const s of treeSet){
     const [H,cyF,rF] = CROWN[s.kind];
     for(const t of s.inst){
-      const e = { x:t.x, z:t.z, cy:t.y + H*t.scale*cyF, cr:Math.max(2, H*t.scale*rF) };
+      const cy = t.y + H*t.scale*cyF, cr = Math.max(2, H*t.scale*rF);
+      const e = { x:t.x, z:t.z, cy, cr, tr: trunkR(s.kind, t.scale), tTop: t.y + Math.min(3.0*t.scale, cy - cr) };
       const k = canopyKey(Math.floor(t.x/32), Math.floor(t.z/32));
       (CANOPY.get(k) || (CANOPY.set(k,[]), CANOPY.get(k))).push(e);
     }
   }
 }
 function canopyAt(x,z,y){
-  let ov=0, near=0, odx=0, odz=0, ndx=0, ndz=0, trunk=false, tdx=0, tdz=0, ocy=0, ocr=0;
+  let ov=0, near=0, odx=0, odz=0, ndx=0, ndz=0, trunk=false, tdx=0, tdz=0, ocy=0, ocr=0, rfv=9;   // §T3: rf of the dominant crown, 9 when none
   const cx=Math.floor(x/32), cz=Math.floor(z/32);
   for(let i=-1;i<=1;i++) for(let j=-1;j<=1;j++){
     const arr = CANOPY.get(canopyKey(cx+i,cz+j)); if(!arr) continue;
@@ -9312,12 +9576,12 @@ function canopyAt(x,z,y){
       const dx=x-t.x, dz=z-t.z, d2=dx*dx+dz*dz, r2=t.cr*t.cr;
       if(d2 > r2*9) continue;
       // §T15: a trunk-core strike — inside the bole radius below crown height
-      if(y < t.cy){ const tr=Math.max(0.6, t.cr*0.15);
+      if(y < t.cy){ const tr=t.tr;   // §T3: the trunk radius, L2b's trunkR table (trunk stops always)
         if(d2 < tr*tr){ trunk=true; tdx=dx; tdz=dz; } }
       const vEnv = 1 - smoothstep(t.cr*0.7, t.cr*1.2, Math.abs(y-t.cy));
       if(vEnv<=0) continue;
       const h = 1 - d2/(r2*1.2);
-      if(h>0 && h*vEnv>ov){ ov = h*vEnv; odx=dx; odz=dz; ocy=t.cy; ocr=t.cr; }   // §T15: the dominant crown's side (+ §W2-C3: its cap)
+      if(h>0 && h*vEnv>ov){ ov = h*vEnv; odx=dx; odz=dz; ocy=t.cy; ocr=t.cr; rfv=Math.sqrt(d2)/t.cr; }   // §T15: the dominant crown's side (+ §W2-C3: its cap, §T3: its rf)
       const nr = (1 - Math.sqrt(d2)/(t.cr*3))*vEnv; if(nr>near){ near=nr; ndx=dx; ndz=dz; }
     }
   }
@@ -9325,7 +9589,36 @@ function canopyAt(x,z,y){
   // nearest rustle, tdx/tdz (+trunk) of a trunk-core strike — so the caller
   // knows WHICH side the tree is on
   return { ov:clamp(ov,0,1), near:clamp(near,0,1), dx:odx, dz:odz, nx:ndx, nz:ndz,
-           trunk, tdx, tdz, cy:ocy, cr:ocr };   // §W2-C3: cy/cr = the dominant crown's cap
+           trunk, tdx, tdz, cy:ocy, cr:ocr, rf:rfv };   // §W2-C3: cy/cr = the dominant crown's cap · §T3: rf = its radius fraction (9 = no crown)
+}
+/*  T3 — trunk solids on foot: circular eject to the bole radius (tr) plus the
+    walker's radius, skipping an entry above its trunk top (the collideWalk
+    band).  Same 3x3 canopyKey cell walk as canopyAt (copied, not called).
+    §31.STEADY2 trunk bonk: the FLIGHT call passes full=true (radius >= 1) and
+    the bole is solid up to the crown centre (t.cy) — the human flew THROUGH a
+    trunk while steering (the canopy core's !sd grace), so the trunk now stops
+    a flyer positionally like a wall at every state; above cy the crown zones
+    (edge/middle/core) own the response as before.  The flyer's clearance is
+    TRUNK_FLY_CLEAR (0.6 — the wall bonk's standoff family), smaller than the
+    core zone (0.33·cr) so canopyAt's spin/fold still fires FIRST on a big
+    crown and the bole eject is the last line.  On foot the band stays tTop
+    (walk under the branches).  Returns its OWN buffer, never _res.         */
+const TRUNK_FLY_CLEAR = 0.6;
+let _trunkHit = null;   // the CANOPY entry whose bole ejected the FLYER this frame (null = none) — read by the §T7d block to give a trunk the cliff's response
+function trunkPush(x, z, curY, radius, full){
+  const res = [x, z];
+  if(full) _trunkHit = null;
+  const cx = Math.floor(x/32), cz = Math.floor(z/32);
+  for(let i=-1;i<=1;i++) for(let j=-1;j<=1;j++){
+    const arr = CANOPY.get(canopyKey(cx+i,cz+j)); if(!arr) continue;
+    for(let n=0;n<arr.length;n++){ const t=arr[n];
+      if(curY > (full ? t.cy : t.tTop) - 0.4) continue;
+      const dx = res[0] - t.x, dz = res[1] - t.z;
+      const d = Math.hypot(dx,dz), rr = t.tr + (full ? TRUNK_FLY_CLEAR : radius);
+      if(d < rr && d > 1e-4){ res[0] = t.x + dx/d*rr; res[1] = t.z + dz/d*rr; if(full) _trunkHit = t; }
+    }
+  }
+  return res;
 }
 /*  §W2 — roof-ridge perch (the human's 2026-08-18 promotion, T-C3 family):
     a house roof is a perch surface — footprint = the ridge SEGMENT (proof's
@@ -9367,6 +9660,7 @@ function microLiftAt(x, z, y, wx, wz, ws){
   // buildings: same idea off the SOLIDS boxes, roofline band.  The real
   // height-bounded top (§W2) where it exists, else the +7 m estimate.
   for(let i=0;i<SOLIDS.length;i++){ const s = SOLIDS[i];
+    if(s.trunk) continue;                 // T3 — pines are solids on foot only (no lift bump near a pine; air.js)
     const dx=x-s.x, dz=z-s.z; if(dx*dx+dz*dz > 900) continue;
     const top = (s.top < 1e8 ? s.top : sampleHeight(s.x, s.z) + 7);
     const vb = smoothstep(9, 2, Math.abs(y - top));
@@ -9391,6 +9685,7 @@ function canopyContactFX(pos, y, airV, yaw){
 }
 
 const _tgtV = new THREE.Vector3();   // §29.1 T0.5: walker.update's per-frame move target, hoisted (§29.10 F9)
+const STAND_NY = 0.53;   // L1 T1: the walk gate's standable normal term (n.y < 0.53, "cliffs are real"), shared with the landing gate
 class Walker {
   constructor(cam){
     this.cam=cam;
@@ -9434,7 +9729,7 @@ class Walker {
     this._airUp=0;           // §F1: air-mass lift acting on the wing (ridge+thermal)
     this._agl=0;             // height above the ground surface, for the pilot line
     this._shake=0; this._inCanopy=false;   // §T7 canopy turbulence + contact state
-    this._spinT=0; this._spinV=0; this._spinRate=0; this._yawW=0;  // §T15 spin-out + yaw-whisper state
+    this._foldT=0; this._spinT=0; this._spinV=0; this._spinRate=0; this._yawW=0;  // §T15 spin-out + §T3 wing-fold + yaw-whisper state
     this._trainT=0;                                                 // §T15b train-shoulder cooldown
     this._brT=0;                                                    // §W2-C5 bridge soft-shoulder cooldown
     this._wallT=0;                                                  // wall-whomp throttle (the buzzer fix)
@@ -9454,10 +9749,12 @@ class Walker {
   _takeoff(){                 // A1: enter flight with a gentle, eased rise
     if(this._inShelter){ if(typeof toast === 'function') toast('not under a roof'); return; }   // §W6-F5
     this.fly=true; this._airborne=false; this.flyY=1.0; this._beatT=0; this._spaceHold=0;
+    { const _wgT = window.__WINGS;   // §M4 — the launch beat spends journey stamina too (the beats-owned arithmetic stays honest); spent wings rise on legs alone
+      if(_wgT && !_wgT.beat()) this._beatT = -1; }
     this._flareT=0;          // a fresh takeoff cancels any leftover landing flare
     this._airV=TRIM; this._trim=0;   // a fresh budget of speed, no leftover trim
     this._cruise=TRIM; this._landIntent=false; this._stallT=-9;
-    this._spinT=0; this._spinV=0;   // §T15: a fresh launch carries no caught wing
+    this._foldT=0; this._spinT=0; this._spinV=0;   // §T15: a fresh launch carries no caught wing (§T3: nor a wing-fold)
     this._perch=null;               // §W2-C3: hopping off a perch surface IS this takeoff
     this._ride=null;                // §W2-B6: a launch leaves the roof behind
     if(audio && audio.whoosh) audio.whoosh(0.07);
@@ -9469,7 +9766,7 @@ class Walker {
       not punishment: never a death screen.  Keys always win — the slew dies the
       frame a bank key is held (the §T6c yielding pattern).                     */
   _spinOut(tx, tz, msg){
-    if(this._spinT > 0) return;
+    if(this._spinT > 0 || this._foldT > 0) return;   // §31.STEADY2: a folded wing is already let go — the bole eject under a slow fold must not add a spin (the T3 slow/fast split stays clean)
     let dy = Math.atan2(-tx, -tz) - this.yaw;
     while(dy>Math.PI) dy-=TAU; while(dy<-Math.PI) dy+=TAU;
     this._spinRate = Math.sign(dy || 1) * (Math.PI/2) / 0.8;
@@ -9481,6 +9778,24 @@ class Walker {
       vx:fx*this._airV*0.35+(Math.random()-0.5)*2, vy:0.5+Math.random(), vz:fz*this._airV*0.35+(Math.random()-0.5)*2,
       age:0, life:4+Math.random()*3, size:0.10+Math.random()*0.05,
       seed:Math.random()*100, kind:1, op:1 });
+    if(typeof toast === 'function') toast(msg);
+  }
+  /*  §T3 — the wing-fold let-go (flag solid2, under State.crash): a slow core or
+      trunk touch folds the wings for 1.2 s — lift x0, the air bleeds toward a
+      mush, the eye floors at -4 m/s, and the ordinary landing check + flare put
+      you down on your feet.  A timed state, never fly=false at height (the 16/s
+      groundY ease would be a camera step — LAW 4).  Not cancelled by sd: nothing
+      slews the camera, "trunk stops always".                                */
+  _letGo(msg){
+    if(this._foldT > 0 || this._spinT > 0) return;
+    this._foldT = 1.2;
+    const fx=-Math.sin(this.yaw), fz=-Math.cos(this.yaw);
+    if(leafP) for(let i=0;i<12;i++) leafP.spawn({
+      x:this.pos.x+(Math.random()-0.5)*3, y:this.freeY-1.2+(Math.random()-0.5)*2, z:this.pos.z+(Math.random()-0.5)*3,
+      vx:fx*this._airV*0.35+(Math.random()-0.5)*2, vy:0.5+Math.random(), vz:fz*this._airV*0.35+(Math.random()-0.5)*2,
+      age:0, life:4+Math.random()*3, size:0.10+Math.random()*0.05,
+      seed:Math.random()*100, kind:1, op:1 });
+    if(audio && audio.whoosh) audio.whoosh(0.08);
     if(typeof toast === 'function') toast(msg);
   }
   look(dx,dy){
@@ -9842,6 +10157,7 @@ class Walker {
           }
         }
       }
+      if(this._foldT > 0){ this._foldT -= dt; this._airV += (TRIM*0.42 - this._airV)*clamp(3*dt,0,1); }
     }
     const sinY=Math.sin(this.yaw), cosY=Math.cos(this.yaw);
     // forward is -Z rotated by yaw
@@ -9871,7 +10187,7 @@ class Walker {
     const slopeMul = this.fly ? 1.0 : clamp(1.0 + slopeDot*1.15, 0.42, 1.30);
     // §W2-C6 — cliffs are real: past ~58° the boots lose the slope and the
     // uphill component of intent dies (downhill and traverse still work).
-    if(State.crag && !this.fly && n.y < 0.53 && wl > 0){
+    if(State.crag && !this.fly && n.y < STAND_NY && wl > 0){
       const gl2 = Math.hypot(n.x, n.z) || 1, ux = -n.x/gl2, uz = -n.z/gl2;
       const du = wx*ux + wz*uz;
       if(du > 0){ wx -= du*ux; wz -= du*uz; }
@@ -9996,6 +10312,26 @@ class Walker {
       }
     }
 
+    /*  §M4 — THE WING JOURNEY hooks (touch journeys only: window.__WINGS is
+        inert-by-construction on desktop and every bench URL).  One stamina
+        clock (ground refill only), the lotus arrival that wakes the wings
+        (grounded, ≤8 m of the bloom — _lotusD2 is the ONE distance², LAW 2),
+        and the gully turnback line: wings=1, truly aloft over the deep air
+        of the viaduct basin — once, gentle.  Landing is never gated.       */
+    const _wg = window.__WINGS;
+    if(_wg && _wg.active){
+      _wg.tick(dt, !this.fly);
+      if(!this.fly && _wg.w === 0 && !window.__OB.pending() && this._lotusD2 < 64)
+        _wg.grant(1);   // §11 T1 — the walk to the lotus wakes the wings
+      else if(this.fly && _wg.w === 1 && !_wg.gullySeen){
+        const gdx = this.pos.x + 195, gdz = this.pos.z - 113;   // the viaduct gully basin
+        if(gdx*gdx + gdz*gdz < 9025){
+          const gh = groundHeightAt(this.pos.x, this.pos.z, this.groundY);
+          if(gh < 30 && (this.freeY - gh) > 6) _wg.gully();     // deep air, truly aloft
+        }
+      }
+    }
+
     if(this.fly){
       /*  Gliding flight.  ATTITUDE sets the glide line: point up and you climb,
           point down and you dive.  Level flight sinks gently.
@@ -10007,7 +10343,7 @@ class Walker {
       const BEAT = 0.85;                                // one unhurried wingbeat
       const flapKey = k['Space']||k['KeyE'];
       if(this._beatT >= 0){ this._beatT += dt; if(this._beatT >= BEAT) this._beatT = -1; }
-      if(this._beatT < 0 && flapKey){
+      if(this._beatT < 0 && flapKey && (!_wg || _wg.beat())){   // §M4 — a NEW beat asks the journey's stamina (gliding never gated)
         this._beatT = 0;
         if(audio && audio.whoosh) audio.whoosh(0.05 + 0.06*clamp(-this.flyY, 0, 2));
       }
@@ -10018,7 +10354,7 @@ class Walker {
         // a gentle breathing ripple instead of pulsing to zero between beats; a
         // single tap still gets the full soft 0 -> peak -> 0 envelope
         const sustain = flapKey ? 0.55 : 0.0;
-        lift = 8.5*(sustain + (1.0-sustain)*ph);
+        lift = 8.5*(sustain + (1.0-sustain)*ph) * (_wg ? _wg.flapK() : 1);   // §M4 — young wings beat softer (tier flap scale; 1 everywhere the journey is inert)
         nose = 0.035*ph;
         if(State.dev && flapKey && k['ShiftLeft']) lift *= 2.0;   // §6.3 T9 dev power: SHIFT-flap doubles the climb — envelope-scaled, still smooth
       }
@@ -10187,13 +10523,39 @@ class Walker {
       if((State.canopy || State.crash) && CANOPY && hAgl < 42){
         const c = canopyAt(this.pos.x, this.pos.z, this.freeY);
         this._canopy = c.ov; State.canopyNear = c.near;
-        if(State.canopy && c.ov > 0){
-          this._airV += (6.5 - this._airV)*clamp(2.8*c.ov*dt, 0, 1);   // foliage drag: a ramp
-          glide -= 1.4*c.ov;                                            // and it costs height
-          this._shake = Math.min((this._shake||0) + c.ov*1.5*dt, 1);
-          if(!this._inCanopy && c.ov > 0.12){ this._inCanopy = true;
-            canopyContactFX(this.pos, this.freeY, this._airV, this.yaw); }
-        } else this._inCanopy = false;
+        if(State.solid2){
+          /*  §T3 — zone consequences (flag solid2): three radius-thirds of the
+              dominant crown's radius (rf).  EDGE — brushing the rim: light drag,
+              a shook wing, the rustle whisper, no leaf burst, no wing-brush.
+              MIDDLE — hard drag + a sink + a one-shot leaf burst + the rustle
+              and the brush pull.  CORE/trunk — no foliage effects; the crash
+              side (below) owns the stopped-at-any-speed consequence.         */
+          if(c.rf > CANOPY_ZONE.edge){
+            if(State.canopy){
+              this._airV += (6.5 - this._airV)*clamp(1.4*c.ov*dt, 0, 1);   // foliage drag x0.5: the rim
+              this._shake = Math.min((this._shake||0) + c.ov*1.5*dt, 1);
+            }
+            this._inCanopy = false;
+          } else if(c.rf >= CANOPY_ZONE.core){
+            if(State.canopy){
+              this._airV += (6.5 - this._airV)*clamp(4.2*c.ov*dt, 0, 1);   // foliage drag x1.5: the heart
+              glide -= 2.2*c.ov;                                           //   and it costs height
+              this._shake = Math.min((this._shake||0) + c.ov*1.5*dt, 1);
+              if(!this._inCanopy && c.ov > 0.12){ this._inCanopy = true;
+                canopyContactFX(this.pos, this.freeY, this._airV, this.yaw); }
+            }
+          } else {
+            this._inCanopy = false;
+          }
+        } else {
+          if(State.canopy && c.ov > 0){
+            this._airV += (6.5 - this._airV)*clamp(2.8*c.ov*dt, 0, 1);   // foliage drag: a ramp
+            glide -= 1.4*c.ov;                                            // and it costs height
+            this._shake = Math.min((this._shake||0) + c.ov*1.5*dt, 1);
+            if(!this._inCanopy && c.ov > 0.12){ this._inCanopy = true;
+              canopyContactFX(this.pos, this.freeY, this._airV, this.yaw); }
+          } else this._inCanopy = false;
+        }
         /*  §T15 — collision consequences (flag crash, default OFF).  Progressive:
             NEAR a crown the air whispers (a breath of yaw toward it, eased);
             a WING-BRUSH pulls harder and the bank follows; TOO DEEP TOO FAST —
@@ -10233,30 +10595,58 @@ class Walker {
             if(typeof toast === 'function') toast('roof-ridge perch — space to fly');
           }
         }
-        if(State.crash && this._spinT <= 0 && !sd){
-          if(c.near > 0){
-            let dy = Math.atan2(c.nx, c.nz) - this.yaw;      // toward the crown
-            while(dy>Math.PI) dy-=TAU; while(dy<-Math.PI) dy+=TAU;
-            const s = clamp(dy, -1, 1);
-            this._yawW += (0.05*c.near*s - this._yawW)*clamp(3*dt,0,1);
-            this.yaw += this._yawW*dt;
-            if(c.ov > 0.12){                                 // wing-brush: the pull
-              this.yaw += s * (0.5*c.ov) * dt;               //   is real, and the
-              this._bankK = clamp(this._bankK + s*0.5*c.ov*dt, -0.5, 0.5);  // bank follows
+        if(State.crash && this._spinT <= 0 && this._foldT <= 0 && !sd){
+          if(State.solid2){
+            /*  §T3 — zone collision (flag solid2): the rustle whisper lives in
+                the EDGE + MIDDLE thirds, the wing-brush bank pull in the MIDDLE
+                third only; the CORE or a trunk stops the wing at ANY speed —
+                an eased spin when fast, a timed wing-fold when slow.  The fold
+                is never re-triggered: this gate carries _foldT <= 0.           */
+            if(c.rf >= CANOPY_ZONE.core && c.near > 0){
+              let dy = Math.atan2(c.nx, c.nz) - this.yaw;      // toward the crown
+              while(dy>Math.PI) dy-=TAU; while(dy<-Math.PI) dy+=TAU;
+              const s = clamp(dy, -1, 1);
+              this._yawW += (0.05*c.near*s - this._yawW)*clamp(3*dt,0,1);
+              this.yaw += this._yawW*dt;
+              if(c.rf <= CANOPY_ZONE.edge && c.ov > 0.12){     // wing-brush: a MIDDLE-third pull
+                this.yaw += s * (0.5*c.ov) * dt;               //   is real, and the
+                this._bankK = clamp(this._bankK + s*0.5*c.ov*dt, -0.5, 0.5);  // bank follows
+              }
+            } else this._yawW += (0 - this._yawW)*clamp(3*dt,0,1);
+            if(c.rf < CANOPY_ZONE.core || c.trunk){
+              if(this._airV > 7)
+                this._spinOut(c.trunk ? -c.tdx : -c.dx, c.trunk ? -c.tdz : -c.dz,
+                  c.trunk ? 'caught a trunk — down through the branches' : 'brushed too deep — down through the branches');
+              else
+                this._letGo('caught in the branches — down you go');
             }
-          } else this._yawW += (0 - this._yawW)*clamp(3*dt,0,1);
-          if(c.trunk && this._airV > 8)
-            this._spinOut(-c.tdx, -c.tdz, 'caught a trunk — down through the branches');
-          else if(c.ov > 0.7 && this._airV > 8)
-            this._spinOut(-c.dx, -c.dz, 'brushed too deep — down through the branches');
+          } else {
+            if(c.near > 0){
+              let dy = Math.atan2(c.nx, c.nz) - this.yaw;      // toward the crown
+              while(dy>Math.PI) dy-=TAU; while(dy<-Math.PI) dy+=TAU;
+              const s = clamp(dy, -1, 1);
+              this._yawW += (0.05*c.near*s - this._yawW)*clamp(3*dt,0,1);
+              this.yaw += this._yawW*dt;
+              if(c.ov > 0.12){                                 // wing-brush: the pull
+                this.yaw += s * (0.5*c.ov) * dt;               //   is real, and the
+                this._bankK = clamp(this._bankK + s*0.5*c.ov*dt, -0.5, 0.5);  // bank follows
+              }
+            } else this._yawW += (0 - this._yawW)*clamp(3*dt,0,1);
+            if(c.trunk && this._airV > 8)
+              this._spinOut(-c.tdx, -c.tdz, 'caught a trunk — down through the branches');
+            else if(c.ov > 0.7 && this._airV > 8)
+              this._spinOut(-c.dx, -c.dz, 'brushed too deep — down through the branches');
+          }
         }
       } else { State.canopyNear = 0; State._rotorK = 0; }   // §W5-E1: the rotor never sticks when the field isn't running
       if(stalling){
         glide = Math.min(glide, -5.0);                              // the wing let go
         this.pitch += (-0.32 - this.pitch)*clamp(1.1*dt, 0, 1);     // nose falls through
       }
+      if(this._foldT > 0) glide = Math.min(glide, -4.0);   // §T3 wing-fold: a slow floor, not a drop
       if(diveKey) glide -= 4.5;
       glide = clamp(glide, -9.0, 8.0);
+      if(this._foldT > 0) lift = 0;   // §T3 wing-fold: a folded wing lifts nothing
       this.flyY += lift*0.55*dt;      // part of the beat lifts, the rest feeds speed
       // eager toward lift, reluctant toward sink — the air catches a pull-out
       // quickly but lets a settle take its time
@@ -10335,6 +10725,7 @@ class Walker {
       if(State.glassoff && (State._glassK||0) > 0.7) first('glass');   // T-E4 rides Tier 3; the hook is ready
     }
     if(!this.cinematic){
+      const _px = this.pos.x, _pz = this.pos.z;   // §31.WALL T1v2 step 2 — pre-integrate pos (the wall restore point)
       this.pos.x += this.vel.x*dt;
       this.pos.z += this.vel.z*dt;
       const _cx = this.pos.x, _cz = this.pos.z;
@@ -10343,6 +10734,55 @@ class Walker {
       if((this.pos.x !== _cx || this.pos.z !== _cz) && this.fly && this._edgeT <= 0){
         this._edgeT = 6;                                    // throttle the nudge
         if(typeof toast === 'function') toast('the valley ends here — bank around');
+      }
+      /*  §31.WALL T1v2 step 2 — the pre-entry steep-wall test (flag wall2,
+          default ON): a bird that flies INTO a face too steep to stand on
+          (n.y < STAND_NY — the one walk/landing owner) BONKS instead of
+          entering it.  Runs AFTER the lateral integrate + edge clamp and
+          BEFORE the flight solids pass, flight-only, so solids/canopy still
+          compose over.  Fires in EVERY fly phase — the launch burst
+          (!_airborne) is exactly where the wall elevator lived, so the gate
+          is this.fly, not _airborne.  THE SIGN: nx=l−r ⇒ n.xz points
+          DOWNHILL = OUT of the face, so the outward push is +n.xz.  Gentle
+          slopes (n.y ≥ STAND_NY) never fire — landings, takeoffs and ridge
+          soaring are untouched.                                             */
+      if(State.wall2 && this.fly && !this._ride && this.freeY !== undefined){
+        /*  §31.STEADY T1v3 (flag wall3) — PREDICTIVE.  Verdict: "bonk works, can
+            still see inside cliff sometimes" / "At the hit".  The reactive test
+            below fires only once the feet are IN the face; the frame before it,
+            the eye can sit ε < 0.2 m from the wall (ε is uniform in one frame of
+            travel) — and the camera's near plane (0.12 m ahead, ±0.09 m corners)
+            already clips into the rock: ONE frame of interior, then the bonk.
+            So test one standoff AHEAD along the horizontal motion as well: the
+            bonk fires ~1.2 m before the wall, the last legal pos (_px) is kept
+            as-is (it already has ≥ 1.2 m of clearance — no outward push, no
+            camera step), the near plane never reaches the rock.  Falls back to
+            the facing when hovering (launch burst).  ?wall3=0 = the T1v2 test. */
+        const spd3 = Math.hypot(this.vel.x, this.vel.z);
+        const dhx3 = spd3 > 0.5 ? this.vel.x/spd3 : -Math.sin(this.yaw);
+        const dhz3 = spd3 > 0.5 ? this.vel.z/spd3 : -Math.cos(this.yaw);
+        const legs3 = State.wall3 ? [1.2, 0] : [0];      // look-ahead first: it is the earlier, gentler stop
+        for(const la of legs3){
+          const tx3 = this.pos.x + dhx3*la, tz3 = this.pos.z + dhz3*la;
+          const g2 = groundHeightAt(tx3, tz3, this.freeY);
+          if(this.freeY >= g2 + CFG.eyeHeight) continue;
+          const n2 = (State.strata2 && window.__CRAGCAP
+                     && Math.hypot(tx3-CRAG_POS.x, tz3-CRAG_POS.z) < 34)
+                  ? cragSurfNormal(tx3, tz3, 0.45)
+                  : sampleNormal(tx3, tz3, 1.4);
+          if(n2.y < STAND_NY){
+            const un2 = Math.hypot(n2.x, n2.z) || 1, ux2 = n2.x/un2, uz2 = n2.z/un2;
+            const vn2 = this.vel.x*ux2 + this.vel.z*uz2;
+            if(vn2 < 0){ this.vel.x -= vn2*ux2; this.vel.z -= vn2*uz2; }   // the into-face component dies
+            const so3 = la > 0 ? 0 : 0.6;                // caught early: keep the last legal pos; caught late: the T1v2 standoff
+            this.pos.x = _px + ux2*so3;                  // never enter: restore (+ the small outward standoff)
+            this.pos.z = _pz + uz2*so3;
+            if(this._airV > 7) this._spinOut(ux2, uz2, 'straight into the cliff — down you go');
+            else this._letGo('the cliff face — no way through');
+            this._airV = Math.min(this._airV, 6);
+            break;
+          }
+        }
       }
       // flight is noclip: walls and parapets only exist for a walker; a canopy is
       // SOFT for a glider — see the §T7d bounce below (same flag) that scrubs
@@ -10365,17 +10805,29 @@ class Walker {
       // §T7d — solid-air: low over a real trunk the wing yields and bounces the
       // horizontal velocity off the surface, but the touch never becomes a crash
       // — unless the §T15 crash flag is on, when a HARD strike spins you down
-      else if(!this._ride && (State.canopy || State.crash) && (this.freeY !== undefined ? this._agl : 999) < 14){
+      else if(!this._ride && (State.canopy || State.crash) && this.freeY !== undefined){
         const r = collideWalk(this.pos.x, this.pos.z, this.freeY - CFG.eyeHeight, 1.2);
         if(r[0] !== this.pos.x || r[1] !== this.pos.z){
           const bx = r[0]-this.pos.x, bz = r[1]-this.pos.z, bl = Math.hypot(bx,bz);
           if(bl > 1e-6){ const nX=bx/bl, nZ=bz/bl;
             const vn = this.vel.x*nX + this.vel.z*nZ;
+            if(State.solid2 && _trunkHit && State.crash){
+              /*  §31.STEADY2 trunk bonk — the human: "bonk should also apply to tree
+                  trunks?" then "A trunk let me through" (steering past the canopy
+                  core's !sd grace).  A bole now answers like the cliff (T1v2/T1v3,
+                  ACCEPTED): the into-trunk velocity dies, the eject holds you out,
+                  fast (> 7) spins you away, slow folds the wing — at ANY steering. */
+              if(vn < 0){ this.vel.x -= vn*nX; this.vel.z -= vn*nZ; }
+              if(this._airV > 7) this._spinOut(bx, bz, 'straight into the trunk — down you go');
+              else this._letGo('the trunk — no way through');
+              this._airV = Math.min(this._airV, 6);
+            } else {
             // §T15: a wall/house/pier met at speed (vn < -6 before the velocity
             // kill) spins you AWAY from the solid — the pushback direction
             if(State.crash && vn < -6 && !sd)
               this._spinOut(bx, bz, 'clipped a wall — down you go');
-            if(vn < 0){ this.vel.x -= vn*nX; this.vel.z -= vn*nZ; } }
+            if(vn < 0){ this.vel.x -= vn*nX; this.vel.z -= vn*nZ; }
+            } }
           this.pos.x = r[0]; this.pos.z = r[1];
           this._airV = Math.min(this._airV, 8);
           // the wall whomp is throttled: ungated it fired every frame while
@@ -10598,7 +11050,7 @@ class Walker {
       // off from the ground auto-lands on frame 1 (freeY starts AT terrainTop and
       // the glide immediately makes flyY negative) and F appears to do nothing
       if(this.freeY > terrainTop + 1.2) this._airborne = true;
-      if(this._airborne && this.freeY < terrainTop && this.flyY <= 0.01){
+      if(this._airborne && this.freeY < terrainTop && n.y >= STAND_NY){
         // landing: hand control back to the walker rather than hovering in limbo
         this.fly = false; this._airborne = false; this.flyY = 0; this.freeY = undefined;
         this.groundY = g; this._flareT = 0.6;          // A1: flare the arrival
@@ -10644,8 +11096,34 @@ class Walker {
           }
         }
       } else {
-        // not yet airborne: rest on the ground so a flap can lift you off it
-        if(this.freeY < terrainTop){ this.freeY = terrainTop; if(this.flyY < 0) this.flyY = 0; }
+        /*  §31.WALL T1v2 — not yet airborne: rest on the ground so a flap can
+            lift you off it — but ONLY over ground you could STAND on.  On a
+            face with n.y < STAND_NY the old unconditional snap glued the eye
+            to a walkable surface that climbs with the pos: the LAUNCH wall
+            elevator (+60 m in 0.3 s — a LAW-4 camera step).  Under wall2 a
+            steep face falls through to the embedded resolve below, which
+            (sign-fixed) kills the into-face velocity and walks the eye OUT.
+            ?wall2=0 restores the old snap verbatim.                         */
+        if(!this._airborne && (!State.wall2 || this.freeY >= terrainTop || n.y >= STAND_NY)){
+          if(this.freeY < terrainTop){ this.freeY = terrainTop; if(this.flyY < 0) this.flyY = 0; }
+        }
+        else if(this.freeY < terrainTop){
+          const slope = Math.hypot(n.x, n.z)/Math.max(n.y, 1e-3);
+          /* §31.WALL T1v2 — THE SIGN: nx=l−r ⇒ n.xz already points DOWNHILL =
+             OUT of the face, so u = +n.xz.  The shipped −n.xz pushed UP-slope
+             and the vn<0 kill removed the ESCAPE velocity (the manufactured
+             wall elevator).  With the sign right: vn<0 = moving INTO the face
+             (killed), the ≤0.9 m/frame push ejects OUTWARD, _spinOut knocks
+             back out.  Walk gate + walk-only camera push are separate paths. */
+          const un = Math.hypot(n.x, n.z) || 1, ux = n.x/un, uz = n.z/un;
+          const vn = this.vel.x*ux + this.vel.z*uz;
+          if(vn < 0){ this.vel.x -= vn*ux; this.vel.z -= vn*uz; }
+          const ej = State.wall3 ? 1.5 : 0.9;   // §31.STEADY T1v3 — an embed < 1.5 m ejects in ONE frame (fewer frames of interior when the predictive test was skipped by a smoothed normal); ?wall3=0 = 0.9
+          this.pos.x += ux*Math.min((terrainTop - this.freeY)/Math.max(slope, 0.55), ej);
+          this.pos.z += uz*Math.min((terrainTop - this.freeY)/Math.max(slope, 0.55), ej);
+          this._airV = Math.min(this._airV, 8);
+          if(State.crash && vn < -6 && !sd) this._spinOut(ux, uz, 'clipped the rock — down you go');
+        }
         /*  No hard ceiling by design: each lift source self-limits (the thermals
             die by +95 m, the cloud-suck band fades, the cumulus column lets go
             ~120 m above its summit), so past the highest formation there is only
@@ -10703,6 +11181,26 @@ class Walker {
         cpx = ex; cpz = ez;
         eye = Math.max(eye, cragGroundAt(ex, ez) + 0.35);
       }
+    }
+    /*  §31.STEADY T1v3 (flag wall3) — the flight-side LAST LINE of the same
+        guarantee.  The C2 push above is walk-only (its ±2.5 m slope gate would
+        flip on/off at flight speed = a camera step, LAW 4).  In flight inside
+        the 140 m crag disc, probe ONLY the near-plane corridor (0.3 m along the
+        view, the C2 idiom, against the VISIBLE surface): if it is cut, walk the
+        eye back along the view ≤ 4 × 0.25 m.  No slope gate, no outward push —
+        it does nothing in every frame that would not have shown rock interior,
+        so ordinary flight (and every meadow) is bit-identical; ?wall3=0 = off. */
+    else if(State.wall3 && this.fly && !this._ride
+       && Math.hypot(this.pos.x-CRAG_POS.x, this.pos.z-CRAG_POS.z) < 140){
+      const cP = Math.cos(this.pitch);
+      const vx = -Math.sin(this.yaw)*cP, vy = Math.sin(this.pitch), vz = -Math.cos(this.yaw)*cP;
+      let ex = this.pos.x, ez = this.pos.z;
+      for(let it = 0; it < 4; it++){
+        const px = ex + vx*0.3, py = eye + vy*0.3, pz = ez + vz*0.3;
+        if(cragGroundAt(px, pz) > py + 0.05){ ex -= vx*0.25; ez -= vz*0.25; eye -= vy*0.25; }
+        else break;
+      }
+      cpx = ex; cpz = ez;
     }
     // the horizon confesses the arc a heartbeat after you pull it.
     // The camera lags the flight PATH (never the stick), so a swoop reads as the
@@ -11521,12 +12019,15 @@ const G = {
   uProxyC:      { value:new THREE.Vector2() },
   uTerrainC:    { value:new THREE.Vector2() },
   uShadowC:     { value:new THREE.Vector2() },
+  uShadowCull:  { value:0 },   // §T6 - placeholder; SHADOW_CULL_R is written after the shadowspan override (R11)
   uCull:        { value:new THREE.Vector4(0,0,-1.1,0) },
   uWindLag:     { value:new THREE.Vector2() },
   uCloudAmount: { value:1.0 },
   uFogMul:      { value:1.0 },
   uTreeCalm:    { value:0 },
   uTreeStill:   { value:0 },
+  uCrown2:      { value:0 },   // §31.WALL S2 — boot-time from State.crown2
+  uTreeKill:    { value:new THREE.Vector2(120, 150) },   // §31.STEADY S3v2 — boot-time from State.treekill: (60,110) on, (120,150) off
   uWindTexel:   { value:1 },   // §V7R4-A2 — wind RT texel (metres); live value set with the F-C origin snap
   uRain2:       { value:0 },
   uRainbow:     { value:0 },
@@ -11664,11 +12165,20 @@ const State = {
    greet:     qsBool('greet', true),       // T14a train whistle salute
    escort:    qsBool('escort', true),      // T14b bird escort after shared soaring
     streaks:   qsBool('streaks', true),     // T14c dive streamers (aesthetic experiment)
-     crash:     qsBool('crash', true),       // T15 collision consequences: rustle→yaw whisper→brush pull→spin-out — ACCEPTED ON 2026-08-16 (the human flew it); ?crash=0 stays the escape
+     crash:     qsBool('crash', true),
+     solid2:    qsBool('solid2', true),     // T3 — solid trunks + pine solids + the canopy zones; human-ordered DEFAULT ON; ?solid2=0 runs today's code path verbatim       // T15 collision consequences: rustle→yaw whisper→brush pull→spin-out — ACCEPTED ON 2026-08-16 (the human flew it); ?crash=0 stays the escape
+     wall2:     qsBool('wall2', true),      // §31.WALL T1v2 step 2 — pre-entry steep-wall test in flight: a face with n.y < STAND_NY is SOLID for a flyer (bonk: kill into-face velocity, restore pos, push out, spin/fold consequence).  Defect fix, default ON; ?wall2=0 escape; flight.js/air.js pin wall2=0
+     wall3:     qsBool('wall3', true),      // §31.STEADY T1v3 — the cliff EYE ("At the hit"): step 2 goes PREDICTIVE (one 1.2 m standoff ahead along the motion; the last legal pos is kept, no push, no camera step) · the airborne-embedded resolve ejects ≤ 1.5 m per frame · a flight-side near-plane corridor walk-back inside the 140 m crag disc (fires only in a frame that would show rock interior).  Defect fix, default ON; ?wall3=0 = T1v2 exactly; flight.js/air.js page B pin wall3=0
     // ── 2026-08-17 R-wave flags (default-off until accepted; ?flag=0 stays the escape) ──
     rain2:     qsBool('rain2', true),      // W1-A3 rain overhaul (rain itself stays KeyM; escape only)
     treecalm:  qsBool('treecalm', true),   // W1-A1 distance-calm vegetation micro-motion (ACCEPTED ON 2026-08-18; ?treecalm=0 escape)
     treestill: qsBool('treestill', true),  // §25.11 mid-range vegetation stillness — continuous LOD comp (F-A), angular motion fades (F-B), wind-origin snap (F-C).  DEFAULT-ON per the human's standing order (2026-08-24); ?treestill=0 restores today's behaviour exactly
+    crown2:    qsBool('crown2', true),     // §31.WALL S2 — near-lens dither-fade of tree geometry within 0.6 m of the eye: brushing a crown reads as leaves, never a flat hollow shell.  Defect fix, default ON; ?crown2=0 escape (uCrown2=0 ⇒ the FS discard is dead code, byte-identical frame)
+    kept:      qsBool('kept', true),       // §31.STEADY W3 — THE KEPT VILLAGE: grass kept short in the yards (0.42) and trodden at the walls (×0.55) of every village SOLID + the lane ribbon, so no lit pane glows through chest-high blades ("a few windows still jittering" / "Nearby houses" = the veil, measured).  Defect fix, default ON; ?kept=0 ⇒ no map, grass shader byte-identical
+    sill:      qsBool('sill', true),       // §31.STEADY W3 — village windows' low row lifted off the ground (sill ≥ 0.55 m; a hut keeps one row).  LAW 12 continuity + the last of the veil.  Default ON; ?sill=0 restores the 0.42·ht row byte-identically (same rng draw)
+    treekill:  qsBool('treekill', true),   // §31.STEADY S3v2 — the tree oscillator kill band moves inward to 60→110 m (was 120→150, §31.WALL S3): the only animated mover left at mid range in flight ("still tremble" / "flying + mid-distance"; shadows/clouds/wind bisected null).  Default ON; ?treekill=0 ⇒ uTreeKill (120,150) = the S3 arithmetic exactly
+    panez:     qsBool('panez', true),      // §31.STEADY2 W4 — the BLACK window jitter = coplanar pane fights: two panes of one house drawn on the same wall plane (21 lit pairs, /tmp/paneoverlap.js), the dark one stealing pixels from the lit one as the eye moves.  Fix: a wall holds no overlapping panes (the later draw is skipped, its r() draws kept — the 8080 stream is untouched) + the pane sits 0.11 proud (was 0.06) so the door (0.10) and framing posts (0.08) are ≥ 6 cm behind its face.  Default ON; ?panez=0 = the 1c geometry byte-for-byte
+    lod3:      qsNum('lod3', 2),           // §31.STEADY2 S3v3b — the far→mid size pop = the 142–158 m det1↔det2 swap (det1 12 clumps ×1.04 read 13 % less area than det2's 22).  2 (default): every broadleaf detail carries all 22 clumps + 5 branches AND det1's clumps sit at the near level's tessellation — the 150 m line has NO clump change left (outline XOR 16 % → 0.4 %); the lobe step moves to 508–532 m (9 % on a 33 px crown); cost +737k tris / +0.4 ms mean at the bench config (paired ABBA drive, card 6.0 debt) · 1: 22 clumps at the mid level's own tessellation (XOR 8.8 %, +218k tris) · 0 = the 12-clump meshes + [1.04, 1.04, 1.0] exactly
     stick:     qsBool('stick', true),      // W2-C1 dive-release swoop trim + thermal bank assist
      swoop2:    qsBool('swoop2', true),     // §22-F2 swoop v2, R3 bar-release pull-out — ACCEPTED ON 2026-08-20 (the human: "much better — river-bank dive-to-swoop works"); ?swoop2=0 stays the escape; flight.js/air.js pin swoop2=0
      smoothrel: qsBool('smoothrel', true),  // §32 V7R-G3 dive-release smoothing — DEFAULT-ON per the human's standing order; ?smoothrel=0 restores V7 behaviour
@@ -11831,6 +12341,8 @@ if(State.ipad){
   if(!QS.has('fpscap'))                State.fpscap = 60;
 }
 if(QS.has('shadowspan')) CFG.shadowSpan = Math.max(60, +QS.get('shadowspan'));
+const SHADOW_CULL_R = CFG.shadowSpan*0.76;   // §T6 - ONE owner for the depth caster-cull radius
+G.uShadowCull.value = SHADOW_CULL_R;         // feed the shared table (depth uniform reads the same value)
 // the total-sample budget is itself a sweep axis: it is what forces px down when
 // MSAA is on, so raising it is the difference between "MSAA instead of
 // supersample" and "MSAA as well as supersample"
@@ -11855,10 +12367,17 @@ const TREE_BIN_DIST = 96;        // hysteresis: only re-bin once the camera has 
     (~√n — the sparse far meshes are drawn larger); TREE_VS then adds a smooth
     ramp over distance so apparent size is a continuous function, never a step. */
 const TREE_COMP = {
-  broadleaf:[1.10, 1.04, 1.0],
-  pine:     [1.04, 1.01, 1.0],
-  poplar:   [1.06, 1.02, 1.0],
-  willow:   [1.08, 1.03, 1.0],
+  // §31.STEADY2 S3v3b (flag lod3): with all 22 clumps at every detail the residual footprint gap is
+  // tessellation only (L0 lobes read 11 % less area than L1's).  Measured on the geometry
+  // (/tmp/lodfoot.js): the area-equal comp 1.056 made the tree read SMALLER at the swap (the human:
+  // "now seems to pop smaller" — a polygon scaled to a lobed outline's area protrudes past it), so
+  // the comp is the OUTLINE-XOR minimum instead: 1.03 (XOR 8.75 %, was 16.0 % at the old 12-clump
+  // det1); det0 == det1 clumps, so comp0 = comp1 (XOR 0.93 % at the 508–532 line).  lod3=2: det1's
+  // clumps ARE det2's (comp1 1.0); the L0→L1 lobe step moves to the 508–532 line (comp0 1.03).
+  broadleaf: State.lod3 >= 2 ? [1.03, 1.0, 1.0] : State.lod3 ? [1.03, 1.03, 1.0] : [1.04, 1.04, 1.0],
+  pine:     [1.01, 1.01, 1.0],
+  poplar:   [1.02, 1.02, 1.0],
+  willow:   [1.03, 1.03, 1.0],
 };
 const _treeBin = { x: CFG.spawn.x, z: CFG.spawn.z };
 let _treeSweep = -1;           // >=0: a staggered re-bin is mid-sweep (one kind per frame)
@@ -11910,7 +12429,7 @@ function buildLotusShrine(){
   /* yaw-local pbox: author in sculpture-local cm, emit in world.            */
   const PBOX=(cx,cy,cz,hx,hy,hz,ryaw,col,mat)=>{
     const [wx,wy,wz]=LW(cx,cy,cz);
-    pbox(M, wx,wy,wz, hx*S,hy*S,hz*S, ryaw+yaw, col, mat);
+    pbox(M, wx,wy,wz, hx*S,hy*S,hz*S, ryaw+yaw, col, mat === 2 ? paneMat2(wx, wz) : mat);   // W2: a mat-2 emitter gets its own stateless phase
   };
   const PCYL=(a,b,r0,r1,seg,col,mat,capA,capB)=>{
     pcyl(M, LW(a[0],a[1],a[2]), LW(b[0],b[1],b[2]), r0*S, r1*S, seg, col, mat, capA, capB);
@@ -12362,19 +12881,60 @@ function buildLotusShrine(){
         }
         for(let k=0;k<20;k++) pt3(M2, ci, ring[k], ring[(k+1)%20]);
       }
-      if(i===2 || i===5){                               // a closed bud rides two of the leaves
-        const bxp = px + Math.sin(az*1.7)*rP*0.35, bzp = pz + Math.cos(az*1.7)*rP*0.35;
-        pcyl(M2, [bxp, top+0.05, bzp], [bxp, top+0.27, bzp], 0.145, 0.075, 8, [1.00,0.96,0.88], 7, false, false);
-        pcyl(M2, [bxp, top+0.27, bzp], [bxp, top+0.45, bzp], 0.075, 0.012, 8, [0.99,0.80,0.78], 7, false, true);
+      if(i===2 || i===5){                               // a small open white flower, centred on the pad
+        /* §SOLID T9-refine — was an OFF-CENTRE converging 6-blade spike that
+           read as a white cone; now a CENTRED open white bloom: 6 rounded
+           petals, ivory with a faint blush and a small gold heart, ~0.15 m
+           across and low — mat 7 silk, deterministic index-trig, no rng.     */
+        const cyf = top + 0.06;
+        const whC = [1.00, 0.98, 0.94], blC = [0.99, 0.90, 0.90], pod2 = [1.00, 0.86, 0.55];
+        const nrm = (ang, k) => { const nl = Math.hypot(k, 1); return [Math.sin(ang)*k/nl, 1/nl, Math.cos(ang)*k/nl]; };
+        const rc = 0.045, halfW = mixc(whC, blC, 0.5);
+        for(let k=0;k<6;k++){
+          const a = k*TAU/6 + az;
+          const w = 0.34, tipR = 0.15, lift = 0.085, rM = 0.15*0.55, midY = cyf + 0.035;
+          const bxf = Math.sin(a), bzf = Math.cos(a);
+          const [nx0,ny0,nz0] = nrm(a, 0.5);
+          const [nxM,nyM,nzM] = nrm(a, 0.7);
+          const [nxT,nyT,nzT] = nrm(a, 0.85);
+          const v0 = pv(M2, px+bxf*rc, cyf, pz+bzf*rc, nx0, ny0, nz0, whC, 7);
+          const v1 = pv(M2, px+Math.sin(a+w*0.5)*rM, midY, pz+Math.cos(a+w*0.5)*rM, nxM, nyM, nzM, halfW, 7);
+          const v2 = pv(M2, px+Math.sin(a-w*0.5)*rM, midY, pz+Math.cos(a-w*0.5)*rM, nxM, nyM, nzM, halfW, 7);
+          const v3 = pv(M2, px+bxf*tipR, cyf+lift, pz+bzf*tipR, nxT, nyT, nzT, whC, 7);
+          pt3(M2, v0, v1, v3);
+          pt3(M2, v0, v3, v2);
+        }
+        pcyl(M2, [px, cyf+0.015, pz], [px, cyf+0.06, pz], 0.036, 0.024, 8, pod2, 7, false, true);
       }
       if(i===1 || i===6 || i===7){
         /* §31.V8R2D T4 — "maybe a small flower in the middle of big pads":
-           the bud recipe OPENED, on the three largest (rP 1.39/1.21/1.36) —
-           a flaring ivory corolla cup + a warm seed-pod heart, mat 7 silk,
-           ~0.33 m across, planted on the crown's tip.                      */
+           the OPEN flower, on the three largest (rP 1.39/1.21/1.36): 8
+           lanceolate petals in 2 tiers (outer tip r 0.22 raised +0.16,
+           inner 0.17 raised +0.21, base r 0.05), outward normals, vertex
+           colours ivory at the base → rose at the tip, a small yellow
+           seed-pod disc at the centre; mat 7 silk, planted on the crown's
+           tip — deterministic index-trig, no rng.                          */
         const cy = top + 0.07;
-        pcyl(M2, [px, cy, pz], [px, cy+0.11, pz], 0.055, 0.165, 8, [1.00,0.97,0.90], 7, true, false);
-        pcyl(M2, [px, cy+0.02, pz], [px, cy+0.09, pz], 0.048, 0.030, 8, [1.00,0.84,0.52], 7, false, true);
+        const baseC = [1.00, 0.96, 0.88], roseC = [0.97, 0.66, 0.60], podC = [1.00, 0.84, 0.52];
+        const nrm = (ang, k) => { const nl = Math.hypot(k, 1); return [Math.sin(ang)*k/nl, 1/nl, Math.cos(ang)*k/nl]; };
+        const r0 = 0.05, halfC = mixc(baseC, roseC, 0.5);
+        for(let k=0;k<8;k++){
+          const a = k*TAU/8 + 0.8;
+          const up = (k&1) === 1;
+          const tipR = up ? 0.17 : 0.22, lift = up ? 0.21 : 0.16, w = up ? 0.20 : 0.30;
+          const rM = tipR*0.55, midY = cy + 0.05;
+          const bx = Math.sin(a), bz = Math.cos(a);
+          const [nx0,ny0,nz0] = nrm(a, 0.55);
+          const [nxM,nyM,nzM] = nrm(a, 0.70);
+          const [nxT,nyT,nzT] = nrm(a, 0.85);
+          const v0 = pv(M2, px+bx*r0, cy, pz+bz*r0, nx0, ny0, nz0, baseC, 7);
+          const v1 = pv(M2, px+Math.sin(a+w*0.5)*rM, midY, pz+Math.cos(a+w*0.5)*rM, nxM, nyM, nzM, halfC, 7);
+          const v2 = pv(M2, px+Math.sin(a-w*0.5)*rM, midY, pz+Math.cos(a-w*0.5)*rM, nxM, nyM, nzM, halfC, 7);
+          const v3 = pv(M2, px+bx*tipR, cy+lift, pz+bz*tipR, nxT, nyT, nzT, roseC, 7);
+          pt3(M2, v0, v1, v3);
+          pt3(M2, v0, v3, v2);
+        }
+        pcyl(M2, [px, cy+0.02, pz], [px, cy+0.09, pz], 0.048, 0.030, 8, podC, 7, false, true);
       }
     }
     /* the walkable record + the hint anchor (shore landing) */
@@ -12598,6 +13158,12 @@ async function boot(){
   G.uFarLp.value = State.farlp ? 1 : 0;              // §T4 — boot-time; live via __U.uFarLp
   G.uTreeCalm.value = State.treecalm ? 1 : 0;        // §W1-A1 — boot-time; live via __U.uTreeCalm
   G.uTreeStill.value = State.treestill ? 1 : 0;      // §25.11 — boot-time; live via __U.uTreeStill
+  G.uCrown2.value = State.crown2 ? 1 : 0;            // §31.WALL S2 — boot-time; live via __U.uCrown2
+  G.uTreeKill.value.set(State.treekill ? 60 : 120, State.treekill ? 110 : 150);   // §31.STEADY S3v2 — boot-time; live via __U.uTreeKill (the A/B lever)
+  if(QS.has('tkill')){   // §31.STEADY2 S3v3a — the human's glass bisection knob: ?tkill=A,B (metres; full motion to A, none past B; 0,1 = every oscillator dead everywhere, the wind lean survives)
+    const tk = String(QS.get('tkill')).split(',').map(Number);
+    if(tk.length === 2 && tk.every(Number.isFinite)) G.uTreeKill.value.set(Math.max(0, tk[0]), Math.max(tk[0] + 0.001, tk[1]));
+  }
   G.uRain2.value = State.rain2 ? 1 : 0;              // §W1-A3 — boot-time; live via __U.uRain2
 
   setStat('painting the ground', 0.42); await idle();
@@ -12784,6 +13350,7 @@ async function boot(){
   /*── village ──*/
   setStat('lighting the village', 0.68); await idle();
   const vil = buildVillage();
+  if(State.kept && vil.kept) KEPT = buildKeptMap(vil.kept);   // §31.STEADY W3 — before the grass builds (GRASS_VS template-reads KEPT); ?kept=0 leaves it null
   villageSmokers = vil.smokers;
   // F1b: every smoking chimney also heats a bubble of rising air.  Pure data
   // derived from the smokers (rate 0.5..1.3 -> lift 1.5..2.5 m/s); nothing
@@ -12860,14 +13427,27 @@ async function boot(){
   const groups = scatterTrees();
   const heightOf = { broadleaf:11.5, pine:14.5, poplar:15.0, willow:9.5 };
   const flexOf   = { broadleaf:1.0, pine:0.52, poplar:0.80, willow:1.75 };
+  const sampleLo = (x, z) => {
+    const fx = clamp((x+HALF)/WS*HL - 0.5, 0, HL-1.001);
+    const fy = clamp((z+HALF)/WS*HL - 0.5, 0, HL-1.001);
+    const x0=fx|0, y0=fy|0, tx=fx-x0, ty=fy-y0;
+    const i=y0*HL+x0;
+    return lerp(lerp(heightLo[i],heightLo[i+1],tx), lerp(heightLo[i+HL],heightLo[i+HL+1],tx), ty);
+  };
   treeSet = [];
   for(const kind in groups){
     const list = groups[kind];
     // precompute each root height once — the re-bin must not re-sample the
     // heightmap thousands of times just to shuffle instances between meshes
-    const inst = list.map(o=>({
-      x:o.x, z:o.z, y:sampleHeight(o.x,o.z)-0.35,
-      scale:o.scale, rot:o.rot, hue:o.hue, phase:o.phase }));
+    const inst = list.map(o=>{
+      const hi = sampleHeight(o.x,o.z);
+      const ringR = trunkR(kind, o.scale)+0.15;
+      let ringMinHi = hi;
+      for(let k=0;k<8;k++){ const a9 = k*Math.PI/4;
+        ringMinHi = Math.min(ringMinHi, sampleHeight(o.x+Math.cos(a9)*ringR, o.z+Math.sin(a9)*ringR)); }
+      return { x:o.x, z:o.z, y: Math.min(ringMinHi, Math.max(sampleLo(o.x,o.z), hi - 1.5)) - 0.35*Math.max(1, o.scale),
+               scale:o.scale, rot:o.rot, hue:o.hue, phase:o.phase };
+    });
     const N = inst.length;
     const meshes=[], pps=[], pvs=[];
     for(let detail=0; detail<3; detail++){
@@ -12884,7 +13464,7 @@ async function boot(){
                        uCullR:{value:0.0}, uFarR:{value:TREE_FAR_R} });
       const dUni = U({ uTreeH:{value:heightOf[kind]}, uFlex:{value:flexOf[kind]},
                        uComp:{value:new THREE.Vector2(TREE_COMP[kind][0], TREE_COMP[kind][1])},
-                       uCullR:{value:CFG.shadowSpan*0.76}, uFarR:{value:0.0} });
+                       uCullR:{value:SHADOW_CULL_R}, uFarR:{value:0.0} });
       const m = new THREE.Mesh(geom, RSM(TREE_VS(), TREE_FS(), uni, {side:THREE.DoubleSide}));
       m.frustumCulled=false; m.renderOrder=2;
       m.userData.depth = DSM(TREE_VS(), dUni, {side:THREE.DoubleSide});
@@ -13154,6 +13734,7 @@ async function boot(){
   window.__U = G;   // shared uniforms, so a driver can flip uBiasFix & co. live
   window.__S = State;
   window.__T = treeSet;   // §7.2b re-bin state, for the driver to inspect
+  window.__CANOPY = CANOPY;   // T3 — the canopy spatial hash (spurclear reads entries' tr); buildCanopy ran earlier in boot
   window.__TCOMP = TREE_COMP;   // §T3c — live tunable, for the driver to A/B
   window.__TRIM = TRIM;   // §T10 — so the suites size their speed thresholds to the shipped trim
   window.__AQ = _aq;      // §T17 — the up-step governor's live state, for the adapt witness + tuning
@@ -15247,9 +15828,12 @@ window.__hoshiTiltCal = TiltCtl.cal;   // wrapper + harness recalibrate hook
     Owner-commissioned (ipad handoff §10): a first-run, touch-only lesson.
     One verb per card — set level (tap) · look (right-half drag) · turn (tilt
     left, then right) · walk (tilt away, then back) · walk level (left-thumb
-    hold) · run (deep forward tilt) — and each card is dismissed ONLY by
+    hold) — and each card is dismissed ONLY by
     witnessing the real input on the SAME channels the harnesses probe
-    (Input.stick / Input.dragPx / walker.keys), never by a timer.  Flying
+    (Input.stick / Input.dragPx / walker.keys), never by a timer.  (The RUN
+    card was DROPPED 2026-09-01 on the owner's glass verdict — "doesn't land,
+    just confuses"; the deep-tilt run VERB itself is untouched gameplay,
+    found by feel.)  Flying
     stays locked until the sequence completes: toggleFly's take-off half and
     the hold-Space take-off both ask OB.lockFly() and show one gentle line;
     landing paths are never gated.  Pure DOM/HUD (§28.3 — zero render work):
@@ -15265,12 +15849,14 @@ window.__hoshiTiltCal = TiltCtl.cal;   // wrapper + harness recalibrate hook
     player keeps touching anyway, the tilt cards are skipped rather than
     trapping them — witnessed on touches, not on time.                      */
 const OB = (()=>{
-  const THR = { turn:0.35, fwd:0.30, back:-0.20, run:0.85,   // stick witnesses
-                dragPx:140, sustain:0.35, runS:0.45, holdS:0.7 };
+  const THR = { turn:0.35, fwd:0.30, back:-0.20,   // stick witnesses
+                dragPx:140, sustain:0.35, holdS:0.7 };
   const SVG = b=>'<svg width="220" height="96" viewBox="0 0 220 96" fill="none" stroke="#F6ECD8"'
     + ' stroke-width="5" stroke-linecap="round" stroke-linejoin="round">' + b + '</svg>';
-  const TRACK_X = '<path d="M40 76 H180" opacity=".3"/><path d="M110 70 V82" opacity=".3"/>',
-        TRACK_Y = '<path d="M172 16 V80" opacity=".3"/><path d="M166 48 H178" opacity=".3"/>',
+  const TRACK_X = '<path d="M40 76 H180" opacity=".3"/><path d="M110 70 V82" opacity=".3"/>'
+        + '<circle cx="110" cy="76" r="11" opacity=".22" stroke-width="2.5"/>',   // §M4 T0 — the faint deadzone ring: inside it you stand still
+        TRACK_Y = '<path d="M172 16 V80" opacity=".3"/><path d="M166 48 H178" opacity=".3"/>'
+        + '<circle cx="172" cy="48" r="9" opacity=".22" stroke-width="2.5"/>',    // §M4 T0 — same ring on the fore/aft track
         DOT_X   = '<circle id="obDot" cx="110" cy="76" r="6" fill="#F6ECD8" stroke="none"/>',
         DOT_Y   = '<circle id="obDot" cx="172" cy="48" r="6" fill="#F6ECD8" stroke="none"/>';
   const ART = {
@@ -15278,7 +15864,10 @@ const OB = (()=>{
         + '<g id="obLit" opacity=".3"><circle cx="84" cy="62" r="7" fill="#F6ECD8" stroke="none"/>'
         + '<circle cx="136" cy="62" r="7" fill="#F6ECD8" stroke="none"/></g>'
         + '<path d="M82 66 Q74 84 58 90" opacity=".45"/><path d="M138 66 Q146 84 162 90" opacity=".45"/>'),
-    drag: SVG('<g id="obLit" opacity=".3"><path d="M72 30 L46 48 L72 66"/><path d="M148 30 L174 48 L148 66"/></g>'
+    drag: SVG('<circle cx="110" cy="48" r="34" opacity=".16" stroke-width="3"/>'
+        + '<circle id="obRing" cx="110" cy="48" r="34" opacity=".85" stroke-width="3"'   // §M4 T0 — the 360 ring fills as the circle comes around
+        + ' stroke-dasharray="213.6" stroke-dashoffset="213.6" transform="rotate(-90 110 48)"/>'
+        + '<g id="obLit" opacity=".3"><path d="M72 30 L46 48 L72 66"/><path d="M148 30 L174 48 L148 66"/></g>'
         + '<path d="M94 48 H126" opacity=".3"/><circle cx="110" cy="48" r="9" fill="#F6ECD8" stroke="none" opacity=".9"/>'),
     tl:   SVG('<g id="obLit" opacity=".3"><path d="M156 36 A50 50 0 0 0 64 32"/><path d="M64 32 L80 24 M64 32 L72 48"/></g>'
         + TRACK_X + '<path d="M85 72 V80" opacity=".5"/>' + DOT_X),
@@ -15290,10 +15879,8 @@ const OB = (()=>{
         + TRACK_Y + '<path d="M167 54 H177" opacity=".5"/>' + DOT_Y),
     hold: SVG('<rect x="55" y="16" width="110" height="64" rx="12" opacity=".45"/><path d="M110 22 V74" opacity=".2"/>'
         + '<g id="obLit" opacity=".3"><circle cx="82" cy="58" r="16"/><circle cx="82" cy="58" r="8" fill="#F6ECD8" stroke="none"/></g>'),
-    run:  SVG('<g id="obLit" opacity=".3"><path d="M84 38 L106 20 L128 38"/><path d="M84 58 L106 40 L128 58"/><path d="M84 78 L106 60 L128 78"/></g>'
-        + TRACK_Y + '<path d="M167 22 H177" opacity=".5"/>' + DOT_Y),
   };
-  /*  the cards: d = progress dot (5 verbs; the grip card lights none) · tilt
+  /*  the cards: d = progress dot (4 verbs; the grip card lights none) · tilt
       marks cards the no-tilt valve may skip · nudge overrides the lock line
       where the generic one would mislead.  The GRIP card (owner design,
       2026-08-30) merges three moments into ONE thumb tap: it teaches the
@@ -15305,14 +15892,13 @@ const OB = (()=>{
       the no-tilt valve skips every tilt card.                               */
   const CARDS = [
     { d:-1, art:'grip', t:'hold the iPad with both hands, like a tray — get comfortable, then tap. if it asks about motion, choose Allow.', tilt:1 },
-    { d: 0, art:'drag', t:'rest a finger on the right half and slide it — you look around.' },
-    { d: 1, art:'tl',   t:'tilt left, like carrying a tray — you turn left.', tilt:1 },
-    { d: 1, art:'tr',   t:'lovely. now tilt right.', tilt:1 },
+    { d: 0, art:'drag', t:'slide a finger on the right half — look all the way around, one full circle.' },
+    { d: 1, art:'tl',   t:'tilt left, like carrying a tray — you turn left. hold it a breath.', tilt:1 },
+    { d: 1, art:'tr',   t:'lovely. now tilt right — hold it a breath.', tilt:1 },
     { d: 2, art:'fwd',  t:'tip the top edge away from you — you walk forward.', tilt:1 },
-    { d: 2, art:'back', t:'tip it back toward you — you slow, then step back.', tilt:1 },
+    { d: 2, art:'back', t:'tip it back toward you — you slow, then step back. come back level to stand still.', tilt:1 },
     { d: 3, art:'hold', t:'let it rest level again. press and hold your left thumb — you walk without tilting.',
       nudge:"hold the thumb down, don't tap" },
-    { d: 4, art:'run',  t:'one more: tip further forward and hold it — you run.', tilt:1 },
   ];
   const eligible = ()=>{
     if(!State.onb || !Input.hasTouch) return false;
@@ -15324,6 +15910,7 @@ const OB = (()=>{
   let el=null, cardEl=null, artEl=null, txtEl=null, dotsEl=null, litEl=null, dotEl=null;
   let on=false, done=false, step=-1, acc=0, base=0, last=0, raf=0, byeT=0;
   let skipTilt=false, touchN=0, tN0=0, tapSeen=false, gripTap=false, nudgeT=0;
+  let flashing=false, yawAcc=0, yawPrev=null, ringEl=null, annT=0, annT2=0;   // §M4 T0 — flash + 360-witness + announce state
   function build(){
     el = $('#ob'); cardEl = $('#obCard'); artEl = $('#obArt'); txtEl = $('#obTxt'); dotsEl = $('#obDots');
     // window-level, passive, touch-only observers: they never eat or reorder
@@ -15340,26 +15927,44 @@ const OB = (()=>{
     }, { passive:true });
   }
   function dots(d){
-    let h = ''; for(let k=0;k<5;k++) h += '<i class="'+(k<d?'was':k===d?'on':'')+'"></i>';
+    let h = ''; for(let k=0;k<4;k++) h += '<i class="'+(k<d?'was':k===d?'on':'')+'"></i>';
     dotsEl.innerHTML = h;
   }
   function next(i){
     while(i < CARDS.length && skipTilt && CARDS[i].tilt) i++;
     if(i >= CARDS.length) return finish();
     step = i; acc = 0; base = Input.dragPx; tN0 = touchN; tapSeen = false; gripTap = false; last = 0;
+    yawAcc = 0; yawPrev = null;   // §M4 T0 — a fresh circle for the look card
     const c = CARDS[i];
     artEl.innerHTML = ART[c.art]; txtEl.textContent = c.t; dots(c.d);
     litEl = artEl.querySelector('#obLit'); dotEl = artEl.querySelector('#obDot');
+    ringEl = artEl.querySelector('#obRing');
   }
+  /*  §M4 T0 — the completion FLASH: the witnessed input has ALREADY earned the
+      advance (the no-timer law is satisfied — nothing here can advance a card
+      that was not passed); the 430 ms is presentation only, one felt pulse at
+      full light before the next card arrives.  `flashing` gates tick() so the
+      pulse can never double-advance; a replay started mid-flash moves `step`,
+      which voids the queued advance.                                        */
   function pass(){
+    if(flashing) return;
+    flashing = true;
     if(audio && audio.note) audio.note(587.33, 0.035, 1.1);
-    next(step + 1);
+    if(litEl){ litEl.classList.remove('obPulse'); litEl.style.opacity = '1'; }
+    if(ringEl) ringEl.setAttribute('stroke-dashoffset', '0');
+    if(cardEl){ cardEl.classList.remove('ok'); void cardEl.offsetWidth; cardEl.classList.add('ok'); }
+    const stepAt = step;
+    setTimeout(()=>{ flashing = false;
+      if(cardEl) cardEl.classList.remove('ok');
+      if(on && !done && step === stepAt) next(step + 1);
+    }, 430);
   }
   function finish(){
     step = CARDS.length; done = true;
     if(PERSIST){ try{ localStorage.setItem('hoshi_ob','1'); }catch(e){} }
+    if(window.__WINGS) window.__WINGS.sync();   // §M4 — the quest chip may speak now (the journey's next step)
     artEl.innerHTML = ''; txtEl.textContent = "that's the walk. the valley is yours — wander.";
-    dots(5);
+    dots(4);
     if(audio && audio.note){ audio.note(659.25, 0.05, 1.4); setTimeout(()=>{ if(audio && audio.note) audio.note(880, 0.04, 1.8); }, 240); }
     el.classList.add('bye');
     /*  the fade teardown must never eat a replay begun during the 4.2 s fade
@@ -15369,6 +15974,24 @@ const OB = (()=>{
     byeT = setTimeout(()=>{ if(!done) return;
       on = false; el.style.display = 'none'; el.classList.remove('bye');
       $('#hud').classList.remove('ob'); }, 4200);
+  }
+  /*  §M4 — the wings-wake announcement rides the SAME card (one overlay, one
+      voice), shown only when the lesson is not teaching.  It gates nothing
+      and witnesses nothing, so its fade timer breaks no law — it is the
+      done-card idiom.  A replay begun mid-announce reclaims the overlay
+      (start() clears these timers and `on` voids the fade teardown).       */
+  function announce(txt){
+    if(on && !done) return;
+    if(!el) build();
+    clearTimeout(byeT); clearTimeout(annT); clearTimeout(annT2);
+    on = false; $('#hud').classList.remove('ob');
+    el.style.display = 'flex'; el.classList.remove('bye');
+    artEl.innerHTML = ''; txtEl.textContent = txt; dotsEl.innerHTML = '';
+    if(audio && audio.note){ audio.note(659.25, 0.05, 1.4); setTimeout(()=>{ if(audio && audio.note) audio.note(880, 0.04, 1.8); }, 240); }
+    annT = setTimeout(()=>{ el.classList.add('bye');
+      annT2 = setTimeout(()=>{ if(on) return;   // a replay reclaimed the overlay mid-fade
+        el.style.display = 'none'; el.classList.remove('bye'); }, 1300);
+    }, 7500);
   }
   function paint(c, g, sx, sy){
     if(litEl){
@@ -15385,6 +16008,7 @@ const OB = (()=>{
     if(!on) return;
     const dt = Math.min(0.1, last ? (t - last)/1000 : 0.016); last = t;
     if(step < 0 || step >= CARDS.length) return;
+    if(flashing) return;   // §M4 T0 — mid-flash: the pass is already banked
     const c = CARDS[step];
     /*  the no-tilt valve: a tilt card armed while NO tilt sample has ever
         arrived, and the player keeps touching anyway — skip the tilt cards
@@ -15402,13 +16026,22 @@ const OB = (()=>{
     switch(c.art){
       case 'grip': if(gripTap && Input.feedN > 0){   // tapped, and tilt truly flows (grant witnessed, never assumed)
           TiltCtl.cal(); toast('level set'); return pass(); } break;
-      case 'drag': { const cum = Input.dragPx - base; g = cum/THR.dragPx;
-        if(cum >= THR.dragPx) return pass(); break; }
+      case 'drag': {   // §M4 T0 — the firmer look witness: one FULL circle of
+        // real yaw, net and signed (drag or tilt-turn both count; wiggles
+        // cancel), the thin ring filling as the circle comes around.  The
+        // arrows still light with drag travel.
+        const wy = walker ? walker.yaw : 0;
+        if(yawPrev === null) yawPrev = wy;
+        const dy0 = wy - yawPrev; yawPrev = wy;
+        if(Math.abs(dy0) < 1) yawAcc += dy0;   // a teleport/glitch frame never counts
+        const fill = Math.min(1, Math.abs(yawAcc)/TAU);
+        if(ringEl) ringEl.setAttribute('stroke-dashoffset', (213.6*(1 - fill)).toFixed(1));
+        g = Math.max((Input.dragPx - base)/THR.dragPx*0.55, fill*0.55);
+        if(fill >= 1) return pass(); break; }
       case 'tl':   cond = sx <= -THR.turn; g = Math.max(-sx/THR.turn*0.55, acc/need); break;
       case 'tr':   cond = sx >=  THR.turn; g = Math.max( sx/THR.turn*0.55, acc/need); break;
       case 'fwd':  cond = sy >=  THR.fwd;  g = Math.max( sy/THR.fwd *0.55, acc/need); break;
       case 'back': cond = sy <=  THR.back; g = Math.max( sy/THR.back*0.55, acc/need); break;
-      case 'run':  need = THR.runS; cond = sy > THR.run; g = Math.max(sy/THR.run*0.55, acc/need); break;
       case 'hold': need = THR.holdS; cond = !!(walker && walker.keys['KeyW']);
         g = cond ? Math.min(1, 0.4 + acc/need) : 0; break;
     }
@@ -15421,8 +16054,9 @@ const OB = (()=>{
   function start(){
     if(on && !done) return;         // already teaching — but a done-card fade may be reclaimed
     if(!el) build();
-    clearTimeout(byeT);
-    on = true; done = false; skipTilt = false; step = -1;
+    clearTimeout(byeT); clearTimeout(annT); clearTimeout(annT2);   // §M4 — a replay reclaims the done card AND the announce card
+    on = true; done = false; skipTilt = false; step = -1; flashing = false;
+    if(window.__WINGS) window.__WINGS.reset();   // §M4 — the gear replay re-arms the WHOLE journey (wings fold back to 0)
     $('#hud').classList.add('ob');
     setTimeout(()=>{ if(!on) return;
       el.style.display = 'flex'; el.classList.remove('bye'); next(0);
@@ -15430,18 +16064,106 @@ const OB = (()=>{
     if(!raf) raf = requestAnimationFrame(tick);
   }
   function nudge(){
-    if(!on || step <= 0) return;                       // pre-show + the grip card's own tap stay quiet
+    const lesson = on && !done;
+    /*  §M4 — after the cards the journey may still hold the sky shut (wings
+        0: the walk to the lotus).  The same gentle line answers a fly tap
+        then — the quest chip carries the way.  No card is up, so no nod.   */
+    if(!lesson){
+      if(!(window.__WINGS && window.__WINGS.locked())) return;
+      const nw = performance.now(); if(nw - nudgeT < 700) return; nudgeT = nw;
+      toast('flying comes later — one step at a time');
+      return;
+    }
+    if(step <= 0) return;                              // pre-show + the grip card's own tap stay quiet
     const now = performance.now(); if(now - nudgeT < 700) return; nudgeT = now;
     toast((CARDS[step] && CARDS[step].nudge) || 'flying comes later — one step at a time');
     if(cardEl){ cardEl.classList.remove('nod'); void cardEl.offsetWidth; cardEl.classList.add('nod'); }
   }
-  return { start, nudge,
+  return { start, nudge, announce,
     pending: ()=> armed && !done,
-    lockFly: ()=> (armed || on) && !done,
+    lockFly: ()=> ((armed || on) && !done) || !!(window.__WINGS && window.__WINGS.locked()),   // §M4 — T0 hands: the sky opens at the lotus
     get armed(){ return armed; }, get on(){ return on; },
     get step(){ return step; }, get done(){ return done; } };
 })();
 window.__OB = OB;   // harness witness + the PWA beacon's ob field
+
+/*──────────────── §M4 — THE WING JOURNEY, Stage A (tiers + the fledgling) ──
+    Owner-designed flight school (ipad handoff §11): learning to fly IS the
+    opening act, geography is the reward — no scores, no meters.  The skill
+    walls are made of AIR and DISTANCE (wide gaps, honest sink), never fences,
+    and every air wall has a walking road under it: landing and gliding are
+    NEVER gated (LAW 13) — only NEW wingbeats ask the stamina.
+    State.wings 0–3, persisted beside hoshi_ob as hoshi_wings JSON {w,g}:
+      0 hands     — the §M3 cards; the sky stays shut (OB.lockFly reads it).
+      1 fledgling — earned by WALKING to the lotus (grounded, ≤8 m of the
+                    bloom): flap ×0.50, 5 wingbeats, refill ~3 s grounded
+                    only.  Skims and the 36 m lotus narrows — the 232 m
+                    viaduct gully stays a wall by arithmetic (26+ beats).
+      2 young     — Stage B (the pillar pilgrimage) earns it: flap 0.75, 12.
+      3 full      — Stage C; ALSO the grandfather clause: a device holding
+                    hoshi_ob (the finished old lesson) with no hoshi_wings
+                    lands here, so no finished player ever loses flight.
+    Touch-gated like §M3 (State.onb + hasTouch; natural runs need PERSIST,
+    ?onb=1 is the harness door, ?onb=0 the total escape): desktop and every
+    bench suite read tier-3 semantics — unlimited flight, zero gating, zero
+    DOM, byte-identical behavior.  The gear replay re-arms the WHOLE journey
+    (OB.start → reset: wings fold back to 0, the turnback line re-arms).    */
+const WINGS = (()=>{
+  const TIER = [ { f:0,    b:0 },     // hands — the OB lock keeps the sky shut
+                 { f:0.50, b:5 },     // fledgling — skims; the gully arithmetic holds
+                 { f:0.75, b:12 },    // young wings (Stage B earns it)
+                 { f:1,    b:1e9 } ]; // full wings — today's flight, untouched
+  const active = State.onb && Input.hasTouch && (QS.has('onb') || PERSIST);
+  let w = 0, g = 0, chipEl = null;
+  if(active && !QS.has('onb') && PERSIST){
+    try{
+      const s = localStorage.getItem('hoshi_wings');
+      if(s !== null){ const j = JSON.parse(s); w = clamp(j.w|0, 0, 3); g = j.g ? 1 : 0; }
+      else if(localStorage.getItem('hoshi_ob')) w = 3;   // the grandfather clause
+    }catch(e){}
+  }
+  let sta = TIER[w].b;
+  const save = ()=>{ if(PERSIST){ try{ localStorage.setItem('hoshi_wings', JSON.stringify({ w, g })); }catch(e){} } };
+  const QUEST = [ 'find the lotus flower on the water — walk to it.',
+                  'cross the river where it narrows — skim low, land on the far grass.' ];
+  function sync(){   // the quest chip: ONE quiet line, bottom, mid-journey only
+    if(!chipEl) chipEl = $('#chip');
+    if(!chipEl) return;
+    const show = active && w < 2 && !OB.pending() && !(OB.on && !OB.done);
+    chipEl.style.display = show ? 'block' : 'none';
+    if(show) chipEl.textContent = QUEST[w];
+  }
+  function grant(n){
+    if(!active || n <= w) return;
+    w = n; sta = TIER[w].b; save(); sync();
+    if(w === 1) OB.announce('your wings wake — small and young. hold to flap. they tire fast — rest on the ground.');
+  }
+  function reset(){   // the gear replay re-arms the whole journey
+    if(!active) return;
+    w = 0; g = 0; sta = TIER[0].b; save(); sync();
+  }
+  return {
+    get active(){ return active; }, get w(){ return w; }, get sta(){ return sta; },   // sta: harness witness
+    locked: ()=> active && w < 1,
+    flapK:  ()=> active ? TIER[w].f : 1,
+    beat(){   // one NEW wingbeat asks here; gliding and landing never do
+      if(!active || w >= 3) return true;
+      if(sta >= 1){ sta -= 1; return true; }
+      return false;
+    },
+    tick(dt, grounded){   // ground refill ~3 s to full; the air never refills
+      if(!active || w === 0 || w >= 3) return;
+      if(grounded && sta < TIER[w].b) sta = Math.min(TIER[w].b, sta + TIER[w].b*dt/3);
+    },
+    gully(){   // §11 — the turnback line, once and gentle
+      if(g) return; g = 1; save();
+      toast('too wide for young wings — the river road is shallow below');
+    },
+    get gullySeen(){ return !!g; },
+    grant, reset, sync };
+})();
+window.__WINGS = WINGS;   // walker integration + harness witness + the beacon's wg field
+WINGS.sync();             // a returning mid-journey device shows its quest line from boot
 
 /*──────────────────────────── input ───────────────────────────────────────*/
 function bindInput(){
