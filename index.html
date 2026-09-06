@@ -5466,7 +5466,7 @@ in vec3 nrm; in vec3 clm; in float flx; in float hue;
 in vec4 iPos;              // xyz = root, w = scale
 in vec4 iVar;              // rot, hueShift, phase, kind
 out vec3 vW; out vec3 vN; out float vHue; out float vLeaf; out float vDist;
-out float vY; out float vAO;
+out float vY; out float vAO;${State.lodfade ? '\nin float iFade; out float vFade;   /* §6.0 step 3 (flag lodfade) — signed keep-fraction of the dissolve mask, see TREE_FS */' : ''}
 void main(){
   // The sun shadow map covers a bounded square around the walker, so a tree two
   // kilometres away cannot possibly cast into it — yet every instance in the
@@ -5620,7 +5620,7 @@ void main(){
   vLeaf = step(0.9, flx); vY = clamp(rp.y/max(H,0.5), 0.0, 1.0);
   vAO = mix(0.62, 1.0, smoothstep(0.0, 0.55, vY));
   vec4 mv = viewMatrix * vec4(wp, 1.0);
-  vDist = -mv.z;
+  vDist = -mv.z;${State.lodfade ? '\n  vFade = iFade;' : ''}
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -5631,9 +5631,21 @@ uniform vec2 uMeanWind;
 ${GL_PAL()}${GL_HASH}${GL_NOISE}${GL_TERRAIN}
 ${GL_CLOUDFIELD}${GL_SHADOW}${GL_LIGHT}${GL_AIR}
 in vec3 vW; in vec3 vN; in float vHue; in float vLeaf; in float vDist;
-in float vY; in float vAO;
+in float vY; in float vAO;${State.lodfade ? '\nin float vFade; uniform vec2 uFadeSeed;   /* §6.0 step 3 (flag lodfade) — dissolve mask varying + the per-frame lattice shift (0 without TAA) */' : ''}
 out vec4 outColor;
-void main(){
+void main(){${State.lodfade ? `
+  /* §6.0 step 3 — the LOD DISSOLVE (flag lodfade): inside a swap band an instance is
+     drawn by BOTH detail levels; the level fading OUT carries iFade = +keep (this
+     fragment survives where the lattice hash is below it), the level fading IN
+     carries iFade = -keep (survives where the hash is at or above 1 - keep) — the two
+     masks are exact complements of ONE screen-space hash, so every pixel shows one
+     level and the pair reads as a cross-fade: a stipple without TAA, a true blend
+     under it (uFadeSeed shifts the lattice every frame, the resolve integrates).
+     |iFade| = 1 is a whole tree and costs one compare.                            */
+  if(abs(vFade) < 1.0){
+    float hF = hash12(floor(gl_FragCoord.xy) + uFadeSeed);
+    if(vFade >= 0.0 ? hF > vFade : hF < 1.0 + vFade) discard;
+  }` : ''}
   /* §31.WALL S2 — the near-lens fade (flag crown2): the eye may legally sit
      inside edge/mid foliage (the three-zones verdict), but a clump shell that
      meets the 0.12 near plane resolves to ONE flat facet filling the frame —
@@ -5785,13 +5797,49 @@ function binTrees(cp, one){
     if(one !== undefined && si !== one) continue;   // staggered sweep: one kind per call
     const s = treeSet[si];
     const counts=[0,0,0];
+    /*  §6.0 step 3 — the LOD DISSOLVE (flag lodfade).  No hysteresis: each swap
+        radius owns a band R ± lodfw and an instance inside it is written to BOTH
+        levels with complementary stipple masks (iFade: the level fading OUT gets
+        +keep, the level fading IN gets -keep — TREE_FS keeps hash < keep for the
+        first and hash >= 1 - keep for the second, so every pixel shows exactly one
+        level).  Outside the bands one level, iFade 1.  ?lodpin=N (any path) puts
+        every instance at level N — the bisection knob.  lodfade=0 runs the
+        original loop below byte-for-byte (lodpin aside).                        */
+    if(State.lodfade){
+      const w = State.lodfw, R1 = 150, R2 = 520;
+      const sst = (a, b, x)=>{ const t = Math.min(1, Math.max(0, (x - a)/(b - a))); return t*t*(3 - 2*t); };
+      const write = (det, inst, fade)=>{
+        const ai = counts[det]*4, p = s.pps[det], v = s.pvs[det];
+        p[ai]=inst.x; p[ai+1]=inst.y; p[ai+2]=inst.z; p[ai+3]=inst.scale;
+        v[ai]=inst.rot; v[ai+1]=inst.hue; v[ai+2]=inst.phase; v[ai+3]=TREE_COMP[s.kind][det];
+        s.pfs[det][counts[det]] = fade; counts[det]++;
+      };
+      for(const inst of s.inst){
+        const d = Math.hypot(inst.x-cp.x, inst.z-cp.z);
+        if(State.lodpin >= 0){ inst.det = State.lodpin; write(State.lodpin, inst, 1); continue; }
+        const t1 = sst(R1 - w, R1 + w, d), t2 = sst(R2 - w, R2 + w, d);
+        if(t1 <= 0){ inst.det = 2; write(2, inst, 1); }
+        else if(t1 < 1){ inst.det = t1 < 0.5 ? 2 : 1; write(2, inst, 1 - t1); write(1, inst, -t1); }
+        else if(t2 <= 0){ inst.det = 1; write(1, inst, 1); }
+        else if(t2 < 1){ inst.det = t2 < 0.5 ? 1 : 0; write(1, inst, 1 - t2); write(0, inst, -t2); }
+        else { inst.det = 0; write(0, inst, 1); }
+      }
+      for(let det=0;det<3;det++){
+        const m = s.meshes[det];
+        m.geometry.instanceCount = counts[det];
+        m.geometry.attributes.iPos.needsUpdate = m.geometry.attributes.iVar.needsUpdate = m.geometry.attributes.iFade.needsUpdate = true;
+        m.userData.binCount = counts[det];
+      }
+      continue;
+    }
     for(const inst of s.inst){
       const d = Math.hypot(inst.x-cp.x, inst.z-cp.z);
       // §T2a — per-instance hysteresis: the detail only changes when the camera
       // has truly crossed the tune line, so a slow walk/settle never churns the
       // buffers.  Instances carry their current detail on the object.
       let det = inst.det;
-      if(det === undefined) det = d<150 ? 2 : (d<520 ? 1 : 0);
+      if(State.lodpin >= 0) det = State.lodpin;                       // §6.0 step 3 — the bisection knob
+      else if(det === undefined) det = d<150 ? 2 : (d<520 ? 1 : 0);
       else if(det===2){ if(d>158) det = d>532 ? 0 : 1; }
       else if(det===1){ if(d<142) det = 2; else if(d>532) det = 0; }
       else            { if(d<508) det = d<142 ? 2 : 1; }
@@ -9371,6 +9419,31 @@ void main(){
   outColor = vec4(c,1.0);
 }`;
 
+/*  §6.0 TAA — ONE owner (LAW 2) for the 5-tap Catmull-Rom fetch (B=0, C=0.5;
+    the four corner taps dropped, weights renormalised): the resolve's history
+    sample and, under the flag, the composite's scene upscale.               */
+const GL_CATMULL5 = /* glsl */`
+vec3 catmull5(sampler2D tex, vec2 uv, vec2 res){
+  vec2 sp = uv*res;
+  vec2 tc = floor(sp - 0.5) + 0.5;
+  vec2 f  = sp - tc;
+  vec2 w0 = f*(-0.5 + f*(1.0 - 0.5*f));
+  vec2 w1 = 1.0 + f*f*(-2.5 + 1.5*f);
+  vec2 w2 = f*(0.5 + f*(2.0 - 1.5*f));
+  vec2 w3 = f*f*(-0.5 + 0.5*f);
+  vec2 w12 = w1 + w2;
+  vec2 t0  = (tc - 1.0)/res;
+  vec2 t3  = (tc + 2.0)/res;
+  vec2 t12 = (tc + w2/w12)/res;
+  vec3 r = texture(tex, vec2(t12.x, t0.y)).rgb * (w12.x*w0.y)
+         + texture(tex, vec2(t0.x, t12.y)).rgb * (w0.x*w12.y)
+         + texture(tex, t12).rgb              * (w12.x*w12.y)
+         + texture(tex, vec2(t3.x, t12.y)).rgb * (w3.x*w12.y)
+         + texture(tex, vec2(t12.x, t3.y)).rgb * (w12.x*w3.y);
+  float wsum = w12.x*w0.y + w0.x*w12.y + w12.x*w12.y + w3.x*w12.y + w12.x*w3.y;
+  return max(r/wsum, vec3(0.0));
+}`;
+
 const COMPOSITE_FS = ()=> /* glsl */`
 precision highp float;
 uniform sampler2D uScene, uBloom, uSoft;
@@ -9452,7 +9525,7 @@ vec3 catrom(sampler2D tex, vec2 uv, vec2 res){
        + texture(tex, vec2(p23.x, p01.y)).rgb  * (w23.x*w01.y)
        + texture(tex, vec2(p01.x, p23.y)).rgb  * (w01.x*w23.y)
        + texture(tex, p23).rgb                  * (w23.x*w23.y);
-}` : ''}
+}` : ''}${ State.taa && State.taaCr ? GL_CATMULL5 : '' }
 float luma(vec3 c){ return dot(c, vec3(0.2126,0.7152,0.0722)); }
 vec3 toSRGB(vec3 c){
   return mix(c*12.92, 1.055*pow(max(c,vec3(1e-5)), vec3(1.0/2.4))-0.055, step(0.0031308, c));
@@ -9467,8 +9540,8 @@ void main(){
   // the centre texel was being fetched four separate times — by FXAA, twice by
   // the aberration and once for the fog weight.  One fetch, passed around.
   vec4 src = texture(uScene, uv);
-  vec2 rcp = 1.0/uRes;
-  vec3 c = uFxaa > 0.5 ? SAFE3(fxaa(uScene, uv, rcp, src.rgb)) : SAFE3(${ State.smoothup ? 'catrom(uScene, uv, uRes)' : 'src.rgb' });
+  vec2 rcp = 1.0/uRes;${/* §6.0 TAA (template-gated, taa=0 emits the next line byte-for-byte): the B-spline upscale exists to low-pass the 0.9x lattice's sub-pixel crawl; the temporal resolve removes that crawl at the source, so under the flag the scene is reconstructed with the interpolating Catmull-Rom instead — the sharpness the B-spline traded away comes back without the aliasing the interpolating kernel used to re-contrast. */''}
+  vec3 c = uFxaa > 0.5 ? SAFE3(fxaa(uScene, uv, rcp, src.rgb)) : SAFE3(${ State.taa && State.taaCr ? 'catmull5(uScene, uv, uRes)' : State.smoothup ? 'catrom(uScene, uv, uRes)' : 'src.rgb' });
   float ca = uCA * (0.0016 + r2*0.0060);
   c.r += texture(uScene, uv + d*ca).r - src.r;
   c.b += texture(uScene, uv - d*ca).b - src.b;
@@ -9535,6 +9608,58 @@ void main(){
   float dth = fract(dot(gl_FragCoord.xy, vec2(0.7548776662, 0.5698402909)));
   c += (dth - 0.5)/255.0;
   outColor = vec4(c, 1.0);
+}`;
+
+/*  §6.0 TAA — the temporal resolve (card 6.0 step 2, 2026-09-06).  Runs once per
+    frame at buffer resolution between the beauty pass and the bloom chain, only
+    when State.taa.  Inputs: the resolved beauty colour (uCur, alpha = the fog
+    weight the composite reads), the resolved beauty depth (uDepth), the previous
+    resolve (uHist).  uReproj carries clip(current, JITTERED) -> clip(previous,
+    UNJITTERED) as one matrix built in float64 on the CPU: for a still camera it is
+    the identity, so the history texel is fetched exactly (no resampling drift) and
+    the accumulated image is the plain mean of the jittered samples — true
+    supersampling.  Everything after the fetch happens in the Karis domain
+    c/(1+Y) (YCoCg): the 3x3 neighbourhood box (mean +- gamma*sigma), the line-box
+    clip of the history toward the box centre, and the blend — a clip that
+    compresses contrast there is perceptually symmetric, so the resolve neither
+    brightens foliage nor flickers on HDR fireflies; the result is mapped back
+    with 1/(1-Y').  Off-screen reprojection or a reset frame = the current colour.
+    Alpha passes straight through: the fog weight is not a temporal quantity.  */
+const TAA_FS = ()=> /* glsl */`
+precision highp float;
+uniform sampler2D uCur, uHist, uDepth;
+uniform vec2  uRes;
+uniform mat4  uReproj;
+uniform float uFb, uClip, uReset;
+in vec2 vUv; out vec4 outColor;
+vec3 toYCC(vec3 c){ return vec3(0.25*c.r + 0.5*c.g + 0.25*c.b, 0.5*c.r - 0.5*c.b, -0.25*c.r + 0.5*c.g - 0.25*c.b); }
+vec3 toRGB(vec3 c){ float t = c.x - c.z; return vec3(t + c.y, c.x + c.z, t - c.y); }
+vec3 karis(vec3 rgb){ vec3 y = toYCC(max(rgb, vec3(0.0))); return y/(1.0 + y.x); }
+vec3 unkaris(vec3 k){ return k/max(1.0 - k.x, 0.002); }
+${GL_CATMULL5}
+void main(){
+  vec4 cur = texture(uCur, vUv);
+  float d = texture(uDepth, vUv).r;
+  vec4 pc = uReproj * vec4(vUv*2.0 - 1.0, d*2.0 - 1.0, 1.0);
+  vec2 puv = pc.xy/pc.w*0.5 + 0.5;
+  vec2 px = 1.0/uRes;
+  vec3 m1 = vec3(0.0), m2 = vec3(0.0);
+  for(int j = -1; j <= 1; j++) for(int i = -1; i <= 1; i++){
+    vec3 n = karis(texture(uCur, vUv + vec2(float(i), float(j))*px).rgb);
+    m1 += n; m2 += n*n;
+  }
+  vec3 mu = m1/9.0;
+  vec3 sg = sqrt(max(m2/9.0 - mu*mu, vec3(0.0)));
+  vec3 lo = mu - uClip*sg, hi = mu + uClip*sg;
+  vec3 h = karis(catmull5(uHist, puv, uRes));
+  vec3 ctr = 0.5*(hi + lo), ext = 0.5*(hi - lo) + vec3(1e-5);
+  vec3 v = h - ctr;
+  vec3 u = abs(v)/ext;
+  float mx = max(u.x, max(u.y, u.z));
+  if(mx > 1.0) h = ctr + v/mx;
+  float ok = (uReset < 0.5 && pc.w > 0.0 && all(greaterThanEqual(puv, vec2(0.0))) && all(lessThanEqual(puv, vec2(1.0)))) ? 1.0 : 0.0;
+  vec3 res = mix(karis(cur.rgb), h, uFb*ok);
+  outColor = vec4(max(toRGB(unkaris(res)), vec3(0.0)), cur.a);
 }`;
 
 /*──────────────────────────── §13  CAMERA & GAIT ───────────────────────────*/
@@ -11896,7 +12021,7 @@ gl.getExtension('EXT_float_blend');
 const gpuT = (()=>{
   const ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
   let on = false;
-  const NAMES = ['wind','cloud','shadow','refl','main','post'];
+  const NAMES = ['wind','cloud','shadow','refl','main','taa','post'];   // §6.0 TAA — its own slot (measurement-only; ?gputime=1)
   const samples = {}; for(const n of NAMES) samples[n]=[];
   const pend = [];
   let MAXQ = 0, qs = null, qi = 0, cur = null, API = null;
@@ -12183,6 +12308,14 @@ const State = {
      swoop2:    qsBool('swoop2', true),     // §22-F2 swoop v2, R3 bar-release pull-out — ACCEPTED ON 2026-08-20 (the human: "much better — river-bank dive-to-swoop works"); ?swoop2=0 stays the escape; flight.js/air.js pin swoop2=0
      smoothrel: qsBool('smoothrel', true),  // §32 V7R-G3 dive-release smoothing — DEFAULT-ON per the human's standing order; ?smoothrel=0 restores V7 behaviour
      smoothup:  qsBool('smoothup', true),   // §37 V7R5-W3 — Catmull-Rom scene reconstruction in the composite (the 0.9x upscale's bilinear lattice pump owned −27/−40% of the nulled shimmer).  Compile-time template gate; ?smoothup=0 restores the single bilinear tap byte-identically
+     taa:       qsBool('taa', false),      // §6.0 TAA (card 6.0 step 2, 2026-09-06) — temporal anti-aliasing: Halton(2,3) sub-pixel jitter on the projection (the mirror camera keeps the clean one — its RT lives 5 frames), the beauty depth resolved into a depth texture, one full-res resolve pass BEFORE bloom (depth reprojection through prev-VP · 5-tap Catmull-Rom history · YCoCg 3×3 variance clip · luminance-weighted blend), the composite/bloom/soft chains read the resolved buffer.  Default OFF until accepted; ?taa=1 is the A/B door.  taa=0 ⇒ no jitter, no depth texture, no pass, fxaaEff unchanged — today's frame path byte-for-byte.  Knobs: ?taafb= history feedback (0.9) · ?taaclip= clip gamma (1.0) · ?taan= jitter sequence length (8).  Harness: pausedSettleRender resets the history and renders a whole number of jitter cycles, so a paused capture is deterministic; window.__taaStep() renders ONE frame without the settle
+     taaFb:     Math.min(0.98, Math.max(0, qsNum('taafb', 0.9))),
+     taaClip:   Math.max(0.1, qsNum('taaclip', 1.0)),
+     taaN:      Math.max(1, qsNum('taan', 8)|0),
+     taaCr:     qsBool('taacr', true),      // §6.0 TAA — the composite reconstructs the resolved scene with the interpolating Catmull-Rom (sharp; the B-spline's low-pass was only ever there for the lattice crawl TAA removes).  ?taacr=0 keeps the B-spline under TAA (softer, less residual shimmer) — a measured trade, see card 6.0
+     lodfade:   qsBool('lodfade', false),   // §6.0 step 3 (2026-09-06) — the tree LOD DISSOLVE: the two hard detail swaps (150 m, 520 m) become stipple cross-fades over ±lodfw metres — an instance inside a band is drawn in BOTH levels with complementary screen-space dither masks (iFade attribute → TREE_FS discard; the mask lattice shifts per frame under TAA, which integrates it into a true blend).  No hysteresis under the flag (the fade is continuous).  Default OFF until the human accepts; ?lodfade=1 is the door; lodfade=0 emits the tree VS/FS byte-for-byte and bins exactly as today
+     lodfw:     Math.max(1, qsNum('lodfw', 8)),    // §6.0 step 3 — dissolve half-width in metres (band = swap radius ± lodfw)
+     lodpin:    qsNum('lodpin', -1),        // §6.0 step 3 — bisection knob: every tree at detail level N (2 = near … 0 = far), no swaps at all.  Expensive at 2; the human's glass test for "is the pop the swap?"
      cragrocky: qsBool('cragrocky', true),  // §24-F1c — summit reward (torii + hall + gold jewel + tōrō + sakura + petal stream + shelf props).  §31.V7 DEFAULT-ON 2026-08-24 by the human's order; ?cragrocky=0 is the one-URL rollback
      rockwind:  qsBool('rockwind', true),    // §29.3 Track B — the "sound of stone": wall-proximity whistle, wing-brush, edge wind, summit windbell — one rock bus.  §31.V7 DEFAULT-ON 2026-08-24 by the human's order; ?rockwind=0 rollback
      cragtherm: qsBool('cragtherm', true),  // §29.2 Track A — the sky ladder (anchored summit thermal + the forming cloud + lift column + ridge band hand-off).  §31.V7 DEFAULT-ON 2026-08-24 by the human's order; ?cragtherm=0 rollback
@@ -13449,19 +13582,25 @@ async function boot(){
                scale:o.scale, rot:o.rot, hue:o.hue, phase:o.phase };
     });
     const N = inst.length;
-    const meshes=[], pps=[], pvs=[];
+    const meshes=[], pps=[], pvs=[], pfs=[];
     for(let detail=0; detail<3; detail++){
       const geom = finishMesh(makeTree(kind, detail, 1000 + kind.length*97 + (State.treesubset ? 0 : detail*13)));
       const iPos = new Float32Array(N*4), iVar = new Float32Array(N*4);
       geom.setAttribute('iPos', new THREE.InstancedBufferAttribute(iPos,4).setUsage(THREE.DynamicDrawUsage));
       geom.setAttribute('iVar', new THREE.InstancedBufferAttribute(iVar,4).setUsage(THREE.DynamicDrawUsage));
+      // §6.0 step 3 — the dissolve mask per instance (signed keep-fraction; 1 = whole).
+      // Always allocated (N floats), only READ by the shader under flag lodfade — an
+      // attribute no program references is never bound, so lodfade=0 draws today's bytes.
+      const iFade = new Float32Array(N).fill(1);
+      geom.setAttribute('iFade', new THREE.InstancedBufferAttribute(iFade,1).setUsage(THREE.DynamicDrawUsage));
       geom.instanceCount = 0;
       // instances migrate between meshes on every re-bin, so the group bounds go
       // stale; bound a world-covering sphere and keep frustumCulled false
       geom.boundingSphere = new THREE.Sphere(new THREE.Vector3(0,60,0), 2000);
       const uni  = U({ uTreeH:{value:heightOf[kind]}, uFlex:{value:flexOf[kind]},
                        uComp:{value:new THREE.Vector2(TREE_COMP[kind][0], TREE_COMP[kind][1])},
-                       uCullR:{value:0.0}, uFarR:{value:TREE_FAR_R} });
+                       uCullR:{value:0.0}, uFarR:{value:TREE_FAR_R},
+                       uFadeSeed:{value:new THREE.Vector2()} });   // §6.0 step 3 — per-frame lattice shift (read under lodfade only)
       const dUni = U({ uTreeH:{value:heightOf[kind]}, uFlex:{value:flexOf[kind]},
                        uComp:{value:new THREE.Vector2(TREE_COMP[kind][0], TREE_COMP[kind][1])},
                        uCullR:{value:SHADOW_CULL_R}, uFarR:{value:0.0} });
@@ -13469,10 +13608,10 @@ async function boot(){
       m.frustumCulled=false; m.renderOrder=2;
       m.userData.depth = DSM(TREE_VS(), dUni, {side:THREE.DoubleSide});
       scene.add(m); trees.push(m);
-      meshes.push(m); pps.push(iPos); pvs.push(iVar);
+      meshes.push(m); pps.push(iPos); pvs.push(iVar); pfs.push(iFade);
       if(detail>0) reflectSet.push(m);
     }
-    treeSet.push({ kind, inst, meshes, pps, pvs });
+    treeSet.push({ kind, inst, meshes, pps, pvs, pfs });
   }
   // initial bin from the spawn — the same radii today's static assignment froze
   // in, so the treebin=0 path reproduces the current behaviour exactly
@@ -13821,6 +13960,7 @@ function dbgMirror(){
   const g = gpuT.enabled() ? gpuT.stats() : null;
   Object.assign(window.__dbg, { dpr:PX_DBG.dpr, px:PX_DBG.px, W:PX_DBG.W, H:PX_DBG.H,
     samples:PX_DBG.samples, prepass:State.prepass?1:0, fpscap:State.fpscap,
+    taa:State.taa?1:0, taaFrame, fxaa:State.fxaaEff?1:0,   // §6.0 TAA — the witnesses report which resolve they saw
     duty: +(State.frameMs/16.67).toFixed(2),
     bias:State.bias?1:0, reflside:State.reflside?1:0, hType: hasFloatLinear?'float':'half', density:State.density,
     gput: g, drawnPerRing: grass && grass.drawnPerRing ? grass.drawnPerRing : null,
@@ -13894,6 +14034,16 @@ function buildTargets(){
       type:THREE.HalfFloatType, format:THREE.RGBAFormat,
       minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter,
       depthBuffer:true, stencilBuffer:false, samples:s });
+    /*  §6.0 TAA — the beauty depth as a TEXTURE (DEPTH_COMPONENT24; with samples
+        the multisampled depth renderbuffer is blitted into it at the resolve —
+        three r180 resolveDepthBuffer).  Only under the flag: taa=0 keeps the
+        plain renderbuffer, today's attachment byte-for-byte.                  */
+    if(State.taa){
+      rt.depthTexture = new THREE.DepthTexture(w, h, THREE.UnsignedIntType);
+      rt.depthTexture.format = THREE.DepthFormat;
+      rt.depthTexture.minFilter = THREE.NearestFilter;
+      rt.depthTexture.magFilter = THREE.NearestFilter;
+    }
     if(s > 0){
       renderer.setRenderTarget(rt);
       const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
@@ -13905,9 +14055,11 @@ function buildTargets(){
   if(sceneRT) sceneRT.dispose();
   sceneRT = makeSceneRT(W,H,samples);
   PX_DBG.samples = sceneRT.samples;
+  taaHistReset();                       // §6.0 TAA — a fresh buffer set is a fresh history (resize / px step)
   // resolved here rather than at the uniform, because it depends on the sample
   // count the driver actually granted (makeSceneRT may step 4->2->0)
-  State.fxaaEff = State.fxaa === null ? (sceneRT.samples === 0) : State.fxaa;
+  // §6.0 TAA owns the edges when it is on: the derived FXAA stays off under it (an explicit ?fxaa= still wins)
+  State.fxaaEff = State.fxaa === null ? (sceneRT.samples === 0 && !State.taa) : State.fxaa;
   /*  Look preservation.  Bloom starts at half-res and steps down bloomLv
       times, so at a higher buffer resolution the same level count covers less
       of the screen and bloom tightens; the soft-chain radius shrinks the same
@@ -14937,8 +15089,13 @@ function reflectionPass(){
   const m = _mirror.set(1,0,0,0, 0,-1,0,2*planeY, 0,0,1,0, 0,0,0,1);
   reflCam.matrixWorld.multiplyMatrices(m, camera.matrixWorld);
   reflCam.matrixWorldInverse.copy(reflCam.matrixWorld).invert();
-  reflCam.projectionMatrix.copy(camera.projectionMatrix);
-  reflCam.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+  /*  §6.0 TAA — the mirror renders with the CLEAN projection: this RT lives for
+      five frames, and the water samples it through the beauty pass's own
+      (jittered) screen position, so the reflection is jittered exactly once,
+      with the scene — a jittered mirror would wobble by (j_now - j_captured)
+      every frame.  taa=0 copies the camera's matrix as it always did.        */
+  reflCam.projectionMatrix.copy(State.taa && _taaWasOn ? _taaProj : camera.projectionMatrix);
+  reflCam.projectionMatrixInverse.copy(reflCam.projectionMatrix).invert();
 
   _swN=0; _bulk.length=0;
   const keep = REFLECT_KEEP;
@@ -15010,14 +15167,87 @@ function windPass(){
   blit(windMat, windRT);
 }
 
+/*  §6.0 TAA runtime (card 6.0 step 2, 2026-09-06).  Shader: TAA_FS; contract:
+    State.taa.  Inert without the flag: frame() calls taaBegin()/taaEnd() only
+    under it, postChain reads taaSrc() which is sceneRT.texture whenever the
+    flag is off, buildTargets attaches the beauty depth texture only under it.
+    Determinism for the paused-pose witnesses: taaFrame indexes the Halton
+    sequence and pausedSettleRender resets it (taaHistReset) before rendering a
+    whole number of jitter cycles, so a settled capture depends only on the
+    scene, never on when the harness asked.                                     */
+let taaRT = [null, null], taaMat = null, taaIdx = 0, taaFrame = 0, taaReset = true, _taaWasOn = false, _taaPrevOk = false;
+const _taaProj = new THREE.Matrix4(), _taaCurVP = new THREE.Matrix4(), _taaPrevVP = new THREE.Matrix4(), _taaReproj = new THREE.Matrix4();
+const _taaPos = new THREE.Vector3(), _taaQuat = new THREE.Quaternion();
+const halton = (i, b)=>{ let f = 1, r = 0; while(i > 0){ f /= b; r += f*(i % b); i = Math.floor(i/b); } return r; };
+function taaJitter(k){ const i = (k % State.taaN) + 1; return [halton(i, 2) - 0.5, halton(i, 3) - 0.5]; }
+function taaHistReset(){ taaReset = true; taaFrame = 0; }
+function taaEnsure(){
+  const W = sceneRT.width, H = sceneRT.height;
+  if(!taaRT[0] || taaRT[0].width !== W || taaRT[0].height !== H){
+    for(let i = 0; i < 2; i++){
+      if(taaRT[i]) taaRT[i].dispose();
+      taaRT[i] = new THREE.WebGLRenderTarget(W, H, { type:THREE.HalfFloatType, format:THREE.RGBAFormat,
+        minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter, depthBuffer:false });
+    }
+    taaHistReset();
+  }
+  if(!taaMat) taaMat = postMat(TAA_FS(), { uCur:{value:null}, uHist:{value:null}, uDepth:{value:null},
+    uRes:{value:new THREE.Vector2()}, uReproj:{value:new THREE.Matrix4()}, uFb:{value:0.9}, uClip:{value:1.0}, uReset:{value:1} });
+}
+/*  Before the aux passes: remember the clean projection, apply this frame's
+    sub-pixel jitter (NDC offset 2*j/W — a constant shift after the divide, so
+    every depth moves alike; the mirror camera keeps the CLEAN projection — see
+    reflectionPass — because its RT outlives the jitter).  A jump of > 8 m or
+    > 60 degrees in one frame (dev view, harness pin, respawn) resets the
+    history rather than smearing it.                                            */
+function taaBegin(){
+  if(!sceneRT.depthTexture) buildTargets();             // booted with taa=0 and switched on live
+  taaEnsure();
+  if(!_taaWasOn) taaHistReset();
+  _taaWasOn = true;
+  if(_taaPrevOk && (_taaPos.distanceToSquared(camera.position) > 64 || Math.abs(_taaQuat.dot(camera.quaternion)) < 0.866)) taaHistReset();
+  _taaPos.copy(camera.position); _taaQuat.copy(camera.quaternion); _taaPrevOk = true;
+  _taaProj.copy(camera.projectionMatrix);
+  const j = taaJitter(taaFrame);
+  const e = camera.projectionMatrix.elements;
+  e[8] += 2*j[0]/sceneRT.width; e[9] += 2*j[1]/sceneRT.height;
+  camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+}
+/*  After the beauty pass: uReproj = P_prev·V_prev·(P_cur·V_cur)^-1 with the CLEAN
+    projection on both sides (float64 on the CPU) — a still camera reprojects to
+    the identity, so the history texel is fetched exactly and the jittered
+    samples average into true supersampling; the sub-pixel parallax the jitter
+    adds to a moving reprojection is below the Catmull-Rom footprint.  Then the
+    resolve blit into the ping-pong, and the clean projection is restored so
+    everything that reads the camera between frames (harness projections, the
+    next frame's fov breathe) sees an unjittered matrix.                        */
+function taaEnd(){
+  const cur = taaRT[taaIdx], hist = taaRT[taaIdx ^ 1];
+  _taaCurVP.multiplyMatrices(_taaProj, camera.matrixWorldInverse);
+  _taaReproj.copy(_taaCurVP).invert().premultiply(_taaPrevVP);
+  const u = taaMat.uniforms;
+  u.uCur.value = sceneRT.texture; u.uHist.value = hist.texture; u.uDepth.value = sceneRT.depthTexture;
+  u.uRes.value.set(sceneRT.width, sceneRT.height);
+  u.uReproj.value.copy(_taaReproj);
+  u.uFb.value = State.taaFb; u.uClip.value = State.taaClip; u.uReset.value = taaReset ? 1 : 0;
+  blit(taaMat, cur);
+  taaReset = false; taaFrame++; taaIdx ^= 1;
+  camera.projectionMatrix.copy(_taaProj);
+  camera.projectionMatrixInverse.copy(_taaProj).invert();
+  _taaPrevVP.multiplyMatrices(_taaProj, camera.matrixWorldInverse);
+}
+// what the post chain reads as "the scene": the latest resolve under the flag, the beauty buffer otherwise
+const taaSrc = ()=> (State.taa && _taaWasOn && taaRT[taaIdx ^ 1]) ? taaRT[taaIdx ^ 1].texture : sceneRT.texture;
+
 function postChain(){
+  const scn = taaSrc();
   if(QS.get('post')==='0'){
     if(!rawMat) rawMat = postMat('uniform sampler2D uSrc;\nin vec2 vUv;\nout vec4 o;\nvoid main(){ vec3 c=texture(uSrc,vUv).rgb; c=c/(c+1.0); o=vec4(pow(c,vec3(1.0/2.2)),1.0); }',
       { uSrc:{value:null} });
-    rawMat.uniforms.uSrc.value = sceneRT.texture;
+    rawMat.uniforms.uSrc.value = scn;
     blit(rawMat, null); return;
   }
-  brightMat.uniforms.uSrc.value = sceneRT.texture;
+  brightMat.uniforms.uSrc.value = scn;
   blit(brightMat, bloomRTs[0]);
   for(let i=1;i<bloomRTs.length;i++){
     const mt = downMats[i];
@@ -15034,14 +15264,14 @@ function postChain(){
     mt.uniforms.uTexel.value.set(1/upRTs[i].width, 1/upRTs[i].height);
     blit(mt, upRTs[i]);
   }
-  softDownMat.uniforms.uSrc.value = sceneRT.texture;
+  softDownMat.uniforms.uSrc.value = scn;
   softDownMat.uniforms.uTexel.value.set(1/softRT[0].width, 1/softRT[0].height);
   blit(softDownMat, softRT[0]);
   blurMats[0].uniforms.uSrc.value = softRT[0].texture; blit(blurMats[0], softRT[1]);
   blurMats[1].uniforms.uSrc.value = softRT[1].texture; blit(blurMats[1], softRT[0]);
 
   const c = composite.uniforms;
-  c.uScene.value = sceneRT.texture;
+  c.uScene.value = scn;
   c.uBloom.value = (upRTs.length ? upRTs[0].texture : bloomRTs[0].texture);
   c.uSoft.value  = softRT[0].texture;
   c.uTime.value  = G.uTime.value;
@@ -15274,6 +15504,11 @@ function frame(now){
   } else State.veilK += (0 - State.veilK)*clamp(dt*2,0,1);
   if(State.breakT > 0) State.breakT -= dt;
 
+  if(State.taa && !_taaMute) taaBegin(); else _taaWasOn = false;   // §6.0 TAA — jitter the projection before anything reads it this frame (muted during the settle pre-roll)
+  if(State.lodfade){                                                // §6.0 step 3 — the dissolve lattice shifts per frame under TAA (integrated into a blend); still without it
+    const sd = (State.taa && _taaWasOn) ? (taaFrame % State.taaN) : 0;
+    for(let i = 0; i < trees.length; i++) trees[i].material.uniforms.uFadeSeed.value.set(sd*17, sd*29);
+  }
   _pm.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
   _frustum.setFromProjectionMatrix(_pm);
   grass.update(camera, _frustum);
@@ -15350,6 +15585,7 @@ function frame(now){
   renderer.clear(true, true, false);
   gpuT.begin('main'); renderer.render(scene, camera); gpuT.end();
   gpuT.poll();
+  if(State.taa && _taaWasOn){ gpuT.begin('taa'); taaEnd(); gpuT.end(); }   // §6.0 TAA — resolve BEFORE bloom; restores the clean projection
   gpuT.begin('post'); postChain(); gpuT.end();
 
   audio.update(dt, camera, walker, State);
@@ -15392,11 +15628,15 @@ function frame(now){
 function benchReport(){
   const pct = (a,p)=>{ const s=[...a].sort((x,y)=>x-y); return s[Math.min(s.length-1,(p/100*s.length)|0)]; };
   const mean = a => a.reduce((x,y)=>x+y,0)/Math.max(1,a.length);
+  // §6.0 item 1 — the worst-frame rows: max + spike counts ride every stat; averages hide what players feel
   const stat = a => ({ mean:+mean(a).toFixed(2), p50:+pct(a,50).toFixed(2),
-                       p95:+pct(a,95).toFixed(2), p99:+pct(a,99).toFixed(2) });
+                       p95:+pct(a,95).toFixed(2), p99:+pct(a,99).toFixed(2),
+                       max:+(a.length ? Math.max(...a) : 0).toFixed(2) });
+  const n33 = BENCH.frame.filter(v => v > 33.4).length, n50 = BENCH.frame.filter(v => v > 50).length;
   const out = { secs:BENCH.n, frames:BENCH.frame.length,
     duty: +(mean(BENCH.frame)/16.67).toFixed(2),
     frameMs:stat(BENCH.frame), cpuMs:stat(BENCH.cpu),
+    spikes:{ n33, n50, pct33:+(100*n33/Math.max(1,BENCH.frame.length)).toFixed(2) },
     phaseMs: (BENCH.phase && BENCH.phase.length) ? (()=>{ const g=[];
       for(let i=0;i<BENCH.phase.length;i++){ const p=BENCH.phase[i]; (g[p]=g[p]||[]).push(BENCH.frame[i]); }
       return g.map(a=>a?a.length?stat(a):null:null); })() : null,
@@ -15407,6 +15647,7 @@ function benchReport(){
     config:{ q:State.q, dpr:+PX_DBG.dpr.toFixed(2), px:+PX_DBG.px.toFixed(2),
       W:PX_DBG.W, H:PX_DBG.H, samples:PX_DBG.samples, prepass:State.prepass?1:0,
       msaa:PX_DBG.samples, fxaa:State.fxaaEff?1:0, fpscap:State.fpscap,
+      taa:State.taa?1:0, taafb:State.taaFb, taaclip:State.taaClip, taan:State.taaN,
       bias:State.bias?1:0, reflside:State.reflside?1:0, seeded:BENCH.seeded?1:0, audio:State.benchAudio?1:0,
       wantRefl:State.wantRefl,
       blades:QUALITY[State.q].blades.join(','), shadowq:QUALITY[State.q].shadow,
@@ -15563,19 +15804,46 @@ function pausedWantRender(now){
     refreshes every RT at the current camera + pinned time, restoring
     bit-deterministic paused captures; a STATIC pause still costs ZERO.       */
 function pausedSettleRender(n){
-  const cyc = (State.phase === 4 ? 5 : 3) * 4;   // ×4 covers the hiAlt shadow/reflection stretch
+  let cyc = (State.phase === 4 ? 5 : 3) * 4;   // ×4 covers the hiAlt shadow/reflection stretch
+  /*  §6.0 TAA — a settled capture must also be a CONVERGED and DETERMINISTIC
+      one.  First the aux settle runs with the resolve MUTED (plain frames: the
+      staggered systems — tree re-bin, aux phases — reach their still-camera
+      state without being written into the history), then the history + jitter
+      index reset and a whole number of jitter cycles accumulate a static world,
+      so the image depends only on the scene and the pinned pose — never on the
+      frame count when the harness asked.  taa=0 keeps the exact 20-frame settle. */
+  if(State.taa){
+    _taaMute = true; for(let i = 0; i < cyc; i++) frame(n); _taaMute = false;
+    taaHistReset(); cyc = Math.ceil(cyc/State.taaN)*State.taaN;
+  }
   for(let i = 0; i < cyc; i++) frame(n);
 }
+let _taaMute = false;   // §6.0 TAA — pausedSettleRender's pre-roll renders plain frames
 /*  §34 V7R3-A1 — harness hook: forces ONE settled render now, synchronously.
     Paused live-uniform A/B flips (bench) must repaint within a tick; the
     canvas keeps its last buffer, so this is the only pulse a static pause
     needs.  Camera bookkeeping is refreshed here so a follow-up camera-move
-    render is not falsely triggered.                                          */
+    render is not falsely triggered.  Returns the TAA jitter index (§6.0): a
+    settled capture reports a whole number of cycles.                         */
 window.__renderOnce = ()=>{
   if(!State.running) return;
   const n = performance.now();
   _pauseCam.copy(camera.position);
   if(State.paused) pausedSettleRender(n); else frame(n);
+  return taaFrame;
+};
+/*  §6.0 TAA harness hook — ONE frame, no settle, no history reset: the honest
+    "next flight frame" (history reprojected from the previous pose) and the
+    live bird-ghost capture.  Ignores State.running so a stopped loop can still
+    be stepped.  While paused dt is 0, so only the camera/flags move — unless
+    dtMs is given: then the sim advances by EXACTLY that much for this one frame
+    (paused is lifted for the call, `last` is set so frame() measures dtMs), a
+    deterministic time step for the flight-sequence meters (§6.0 step 3).     */
+window.__taaStep = (dtMs)=>{
+  const n = performance.now(); _pauseCam.copy(camera.position);
+  if(dtMs > 0 && State.paused){ State.paused = false; last = n - dtMs; frame(n); State.paused = true; }
+  else frame(n);
+  return taaFrame;
 };
 function loop(now){
   requestAnimationFrame(loop);
