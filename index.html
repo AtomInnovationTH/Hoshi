@@ -12308,12 +12308,12 @@ const State = {
      swoop2:    qsBool('swoop2', true),     // §22-F2 swoop v2, R3 bar-release pull-out — ACCEPTED ON 2026-08-20 (the human: "much better — river-bank dive-to-swoop works"); ?swoop2=0 stays the escape; flight.js/air.js pin swoop2=0
      smoothrel: qsBool('smoothrel', true),  // §32 V7R-G3 dive-release smoothing — DEFAULT-ON per the human's standing order; ?smoothrel=0 restores V7 behaviour
      smoothup:  qsBool('smoothup', true),   // §37 V7R5-W3 — Catmull-Rom scene reconstruction in the composite (the 0.9x upscale's bilinear lattice pump owned −27/−40% of the nulled shimmer).  Compile-time template gate; ?smoothup=0 restores the single bilinear tap byte-identically
-     taa:       qsBool('taa', false),      // §6.0 TAA (card 6.0 step 2, 2026-09-06) — temporal anti-aliasing: Halton(2,3) sub-pixel jitter on the projection (the mirror camera keeps the clean one — its RT lives 5 frames), the beauty depth resolved into a depth texture, one full-res resolve pass BEFORE bloom (depth reprojection through prev-VP · 5-tap Catmull-Rom history · YCoCg 3×3 variance clip · luminance-weighted blend), the composite/bloom/soft chains read the resolved buffer.  Default OFF until accepted; ?taa=1 is the A/B door.  taa=0 ⇒ no jitter, no depth texture, no pass, fxaaEff unchanged — today's frame path byte-for-byte.  Knobs: ?taafb= history feedback (0.9) · ?taaclip= clip gamma (1.0) · ?taan= jitter sequence length (8).  Harness: pausedSettleRender resets the history and renders a whole number of jitter cycles, so a paused capture is deterministic; window.__taaStep() renders ONE frame without the settle
+     taa:       qsBool('taa', true),       // §6.0 TAA (card 6.0 step 2, 2026-09-06) — temporal anti-aliasing: Halton(2,3) sub-pixel jitter on the projection (the mirror camera keeps the clean one — its RT lives 5 frames), the beauty depth resolved into a depth texture, one full-res resolve pass BEFORE bloom (depth reprojection through prev-VP · 5-tap Catmull-Rom history · YCoCg 3×3 variance clip · luminance-weighted blend), the composite/bloom/soft chains read the resolved buffer.  DEFAULT ON since 2026-09-07 (card 6.0 "THE FLIP": judged by the integrator's own frame reads — mid-crown flicker −15 %, far −60 %, nulled meter −15…−45 %, no bird ghosts, edges clean, +0.6 ms at the bench window); ?taa=0 is the escape forever ⇒ no jitter, no depth texture, no pass, fxaaEff unchanged — the pre-flip frame path byte-for-byte.  The ipad preset keeps it OFF unless named (see the §6.0 FLIP block after the preset).  Knobs: ?taafb= history feedback (0.9) · ?taaclip= clip gamma (1.0) · ?taan= jitter sequence length (8).  Harness: pausedSettleRender resets the history and renders a whole number of jitter cycles, so a paused capture is deterministic; window.__taaStep() renders ONE frame without the settle
      taaFb:     Math.min(0.98, Math.max(0, qsNum('taafb', 0.9))),
      taaClip:   Math.max(0.1, qsNum('taaclip', 1.0)),
      taaN:      Math.max(1, qsNum('taan', 8)|0),
      taaCr:     qsBool('taacr', true),      // §6.0 TAA — the composite reconstructs the resolved scene with the interpolating Catmull-Rom (sharp; the B-spline's low-pass was only ever there for the lattice crawl TAA removes).  ?taacr=0 keeps the B-spline under TAA (softer, less residual shimmer) — a measured trade, see card 6.0
-     lodfade:   qsBool('lodfade', false),   // §6.0 step 3 (2026-09-06) — the tree LOD DISSOLVE: the two hard detail swaps (150 m, 520 m) become stipple cross-fades over ±lodfw metres — an instance inside a band is drawn in BOTH levels with complementary screen-space dither masks (iFade attribute → TREE_FS discard; the mask lattice shifts per frame under TAA, which integrates it into a true blend).  No hysteresis under the flag (the fade is continuous).  Default OFF until the human accepts; ?lodfade=1 is the door; lodfade=0 emits the tree VS/FS byte-for-byte and bins exactly as today
+     lodfade:   qsBool('lodfade', true),    // §6.0 step 3 (2026-09-06) — the tree LOD DISSOLVE: the two hard detail swaps (150 m, 520 m) become stipple cross-fades over ±lodfw metres — an instance inside a band is drawn in BOTH levels with complementary screen-space dither masks (iFade attribute → TREE_FS discard; the mask lattice shifts per frame under TAA, which integrates it into a true blend).  No hysteresis under the flag (the fade is continuous).  DEFAULT ON since 2026-09-07 with the resolve (card 6.0 "THE FLIP"; priced FREE, +0.35 % tris) and it FOLLOWS taa unless named (the §6.0 FLIP block below: without the temporal resolve the masks are a static screen-door, not a blend); ?lodfade=0 is the escape — it emits the tree VS/FS byte-for-byte and bins exactly as before
      lodfw:     Math.max(1, qsNum('lodfw', 8)),    // §6.0 step 3 — dissolve half-width in metres (band = swap radius ± lodfw)
      lodpin:    qsNum('lodpin', -1),        // §6.0 step 3 — bisection knob: every tree at detail level N (2 = near … 0 = far), no swaps at all.  Expensive at 2; the human's glass test for "is the pop the swap?"
      cragrocky: qsBool('cragrocky', true),  // §24-F1c — summit reward (torii + hall + gold jewel + tōrō + sakura + petal stream + shelf props).  §31.V7 DEFAULT-ON 2026-08-24 by the human's order; ?cragrocky=0 is the one-URL rollback
@@ -12472,7 +12472,18 @@ if(State.ipad){
   if(!QS.has('shadowq'))               ip.shadow = 2048;
   if(!QS.has('gb'))                    State.gb  = [0.7, 0.7, 0.7, 0.7];
   if(!QS.has('fpscap'))                State.fpscap = 60;
+  /*  §6.0 FLIP (2026-09-07) — the temporal resolve stays OFF on the iPad preset
+      unless ?taa= names it: never run on Safari/Metal (the multisampled-depth →
+      depth-texture resolve is untested there) and the weak-preset rung (taa +
+      msaa 0 + px 0.7) is its own glass ticket.  Same yield-to-query rule as the
+      knobs above.                                                                */
+  if(!QS.has('taa'))                   State.taa = false;
 }
+/*  §6.0 FLIP (2026-09-07) — the LOD dissolve FOLLOWS the temporal resolve unless
+    ?lodfade= names it: without TAA the complementary stipple masks are a visible
+    screen-door, not a blend.  ?taa=0 alone therefore restores the pre-flip tree
+    path too; ?taa=0&lodfade=1 is the (diagnostic) stipple-without-resolve look.  */
+if(!QS.has('lodfade')) State.lodfade = State.taa;
 if(QS.has('shadowspan')) CFG.shadowSpan = Math.max(60, +QS.get('shadowspan'));
 const SHADOW_CULL_R = CFG.shadowSpan*0.76;   // §T6 - ONE owner for the depth caster-cull radius
 G.uShadowCull.value = SHADOW_CULL_R;         // feed the shared table (depth uniform reads the same value)
