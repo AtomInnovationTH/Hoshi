@@ -4919,6 +4919,19 @@ function riverWidth(t){ return 9.5 + 16.0*Math.pow(clamp(t,0,1),0.7) + Math.sin(
 const DF = 512, DFS = WS/DF;                     // 4.69 m cells
 const dfDist = new Float32Array(DF*DF).fill(1e9);
 const dfT    = new Float32Array(DF*DF);
+const RIVER_EXACT = !/[?&]exactriver=0(?:&|$)/.test(location.search);   // 2026-10-22: default on; ?exactriver=0 = the old snapped field
+/*  2026-10-22 river fixes (R2): four default-on switches, each ?name=0 restores the previous behaviour for that item.
+    Read straight from location.search (qsBool/QS are declared much later in the file).
+      watershore  water ribbon edge follows the real shoreline (was: a fixed ±riverWidth, 3-4 m short of it)
+      shoregrass  grass roots start above the waterline (was: up to 0.55 m under it)
+      reflplane   the mirror plane is the local water level (was: one plane, the viaduct's, for a river that falls 34 m).
+                  DEFAULT OFF (coordinator review 2026-10-22): the plane is the water height at the river point nearest the
+                  camera, so it slides/jumps when the camera crosses between two bends, and its 2.5-9 m fade band drops
+                  far reaches from the air.  Try ?reflplane=1; fix (plane from the water in view, eased) before turning on.
+      riverstamps the village terrace / spawn knoll no longer lift the river bed and bank (was: bed 1.6 m deep instead of 3.4 m at idx 460-640)  */
+const _fl = n => !new RegExp('[?&]'+n+'=0(?:&|$)').test(location.search);
+const FIX_WATERSHORE = _fl('watershore'), FIX_SHOREGRASS = _fl('shoregrass'), FIX_REFLPLANE = /[?&]reflplane=1(?:&|$)/.test(location.search), FIX_RIVERSTAMPS = _fl('riverstamps');
+let dfDistS = null, dfTS = null;                 // the snapped copy (only kept when the exact pass replaces it)
 {
   // seed
   const sx = new Int16Array(DF*DF).fill(-9999), sy = new Int16Array(DF*DF).fill(-9999);
@@ -4952,10 +4965,13 @@ const dfT    = new Float32Array(DF*DF);
       (chunk-pruned search: 24-segment chunks with a bounding circle; the winner's neighbourhood seeds
       the best distance).  riverField() still reads the grid bilinearly, so every caller is unchanged.
       Escape: ?exactriver=0 keeps the snapped values.
-      DEFAULT OFF (coordinator, 2026-10-14): turning it on also re-places ~835 of the 2059 trees,
-      because the woods' random draws depend on terrain filters near the river — that is a change
-      to the owner's familiar world, so it waits for his OK.  Try it with ?exactriver=1.              */
-  if(/[?&]exactriver=1(?:&|$)/.test(location.search)){
+      2026-10-22 DEFAULT ON (lane R1 RIVERBANK).  It was off because turning it on re-placed ~835 of the 2059
+      trees: the woods' random draws depend on terrain filters near the river.  scatterTrees now makes
+      every draw-count decision with the OLD snapped field (kept below as dfDistS/dfTS, plus a lazily
+      re-baked snapped ground: heightS) so the rng stream is identical to the old world, and only
+      afterwards skips a tree whose new spot is in the water or on a too steep bank.                  */
+  if(RIVER_EXACT){
+    dfDistS = dfDist.slice(); dfTS = dfT.slice();      // the old snapped field, for scatterTrees' draw-count decisions
     const P = RIVER_PTS, NS = P.length-1, K = 24, NC = Math.ceil(NS/K);
     const cx = new Float64Array(NC), cz = new Float64Array(NC), cr = new Float64Array(NC);
     for(let c=0;c<NC;c++){
@@ -4987,6 +5003,17 @@ function riverField(x,z){                        // -> {d, t} bilinear
   const i00=y0*DF+x0, i10=i00+1, i01=i00+DF, i11=i01+1;
   const d = lerp(lerp(dfDist[i00],dfDist[i10],tx), lerp(dfDist[i01],dfDist[i11],tx), ty);
   const t = lerp(lerp(dfT[i00],dfT[i10],tx), lerp(dfT[i01],dfT[i11],tx), ty);
+  return {d, t};
+}
+/*  2026-10-22 — the OLD (snapped) river field, same bilinear read.  Only scatterTrees' draw-count decisions use it
+    (see there); with ?exactriver=0 it IS riverField.                                                          */
+function riverFieldS(x,z){
+  if(!dfDistS) return riverField(x,z);
+  const fx = clamp((x+HALF)/DFS, 0, DF-1.001), fy = clamp((z+HALF)/DFS, 0, DF-1.001);
+  const x0=fx|0, y0=fy|0, tx=fx-x0, ty=fy-y0;
+  const i00=y0*DF+x0, i10=i00+1, i01=i00+DF, i11=i01+1;
+  const d = lerp(lerp(dfDistS[i00],dfDistS[i10],tx), lerp(dfDistS[i01],dfDistS[i11],tx), ty);
+  const t = lerp(lerp(dfTS[i00],dfTS[i10],tx), lerp(dfTS[i01],dfTS[i11],tx), ty);
   return {d, t};
 }
 
@@ -5759,12 +5786,12 @@ function baseHills(x,z){
 
 let _bridgeDeck = null;
 function bridgeDeckY(){
-  if(_bridgeDeck === null) _bridgeDeck = waterLevel(riverField(BRIDGE.x, BRIDGE.z).t) + 26.0;
+  if(_bridgeDeck === null) _bridgeDeck = waterLevel(riverFieldS(BRIDGE.x, BRIDGE.z).t) + 26.0;   // riverFieldS: the viaduct and the railway keep their familiar (snapped-field) heights
   return _bridgeDeck;
 }
 
-function terrainAt(x,z){
-  const rf = riverField(x,z);
+function terrainAt(x,z,snap){                    // snap: use the OLD snapped river field (scatterTrees only)
+  const rf = snap ? riverFieldS(x,z) : riverField(x,z);
   const wl = waterLevel(rf.t);
   const wob = noise2(x*0.0032+4.4, z*0.0032-2.1);
   const regional = wl + 60;
@@ -5777,7 +5804,16 @@ function terrainAt(x,z){
 
   // spawn knoll — puts the camera on an overlook for the opening frame
   const dk = Math.hypot(x-SPAWN_KNOLL.x, z-SPAWN_KNOLL.z);
-  h += SPAWN_KNOLL.h * Math.pow(Math.max(0, 1 - dk/SPAWN_KNOLL.r), 2.0);
+  /*  riverstamps (R2): the knoll and the village terrace were stamped without regard to the river and lifted the bed and bank
+      (ground up to 1.9 m above the waterline inside the water ribbon).  Gated by river distance.  `snap` (the woods' old-ground
+      view) keeps the OLD stamps so no tree moves.  */
+  const _rs = FIX_RIVERSTAMPS && !snap, _rw = _rs ? riverWidth(rf.t) : 0;
+  let _kf = _rs ? smootherstep(_rw+2, _rw+14, rf.d) : 1;
+  /*  …except along the footbridge spur (coordinator, 2026-10-22): that walkway comes down the knoll to the landing and was
+      laid on the lifted bank; without it the V8R2D on-land assert fired (spur samples 0.06–0.12 m under the waterline at
+      (-57.7, 127.9)).  The spur's corridor (3 m, fading by 9 m) keeps the knoll's lift.                               */
+  if(_kf < 1 && dk < SPAWN_KNOLL.r) _kf = Math.max(_kf, 1 - smoothstep(3, 9, spurDist(x, z)));
+  h += SPAWN_KNOLL.h * Math.pow(Math.max(0, 1 - dk/SPAWN_KNOLL.r), 2.0) * _kf;
 
   // §W2-C6 — the lookout crag (east rim; unreachable on foot once the slope
   // gate ships).  Flat 15 m cap — ≈31 m across ≈ 3 low-pass texels, so the
@@ -5801,7 +5837,7 @@ function terrainAt(x,z){
   if(dv < VILLAGE.r*1.5){
     const w = smootherstep(VILLAGE.r*1.5, VILLAGE.r*0.35, dv);
     const target = wl + 16 + (z-VILLAGE.z)*0.075 + noise2(x*0.01,z*0.01)*2.2;
-    h = lerp(h, target, w*0.72);
+    h = lerp(h, target, w*0.72*(_rs ? smootherstep(_rw+8, _rw+34, rf.d) : 1));
   }
   // (the railway's own grading shapes the approaches; see trackAdjust —
   //  nothing is stamped under the bridge itself)
@@ -5810,7 +5846,7 @@ function terrainAt(x,z){
 
 /* bridge orientation: perpendicular to the river at the crossing */
 const BRIDGE_AXIS = (()=>{                       // along the track
-  const a = riverField(BRIDGE.x, BRIDGE.z);
+  const a = riverFieldS(BRIDGE.x, BRIDGE.z);    // snapped, like the deck
   let i = Math.round(a.t*(RIVER_PTS.length-1));
   i = clamp(i, 3, RIVER_PTS.length-4);
   const p0=RIVER_PTS[i-3], p1=RIVER_PTS[i+3];
@@ -5929,7 +5965,8 @@ function bakeSplat(){
       // ragged, noise-broken edge rather than a smooth analytic blob.
       let mask = 1;
       mask *= 1 - smoothstep(0.60, 0.88, slope);       // cliffs only
-      mask *= smoothstep(-0.55, 0.75, h - wl);         // right down to the water
+      mask *= FIX_SHOREGRASS ? smoothstep(0.15, 1.10, h - wl)   // R2: roots start above the waterline (24.8 % of the shore band was rooted under water)
+                             : smoothstep(-0.55, 0.75, h - wl);         // right down to the water
       const dv = Math.hypot(wx-VILLAGE.x, wz-VILLAGE.z);
       mask *= lerp(1, 0.42, smoothstep(VILLAGE.r*0.70, VILLAGE.r*0.16, dv));
       const dp = PATH_DF(wx,wz).d;
@@ -6214,6 +6251,15 @@ function bakeMeadow(){
     buried in an earth causeway), but a *cutting* can always be dug: no amount
     of excavation can fill a valley.  This second pass therefore guarantees a
     level, un-buried formation for the full length of the line.               */
+function carveOne(f, h){                         // one texel of carveTrackBed (f = TRACK.field there, h = its height)
+  if(f.d > 26) return h;
+  const formation = TRACK.yAt(f.t) - 0.92;
+  if(h <= formation + 0.05) return h;              // already low enough
+  // full depth on the 4.4 m formation, then a 1:3 batter out to 26 m
+  const w = 1 - smootherstep(4.4, 26.0, f.d);
+  const target = formation + Math.max(0, f.d-4.4)*0.34;
+  return Math.min(h, lerp(h, Math.min(h, target), w));
+}
 function carveTrackBed(){
   if(!TRACK) return;
   for(let y=0;y<HM;y++){
@@ -6222,13 +6268,7 @@ function carveTrackBed(){
       const wx=((x+0.5)/HM)*WS-HALF;
       const f=TRACK.field(wx,wz);
       if(f.d > 26) continue;
-      const formation = TRACK.yAt(f.t) - 0.92;
-      const h = heightData[y*HM+x];
-      if(h <= formation + 0.05) continue;          // already low enough
-      // full depth on the 4.4 m formation, then a 1:3 batter out to 26 m
-      const w = 1 - smootherstep(4.4, 26.0, f.d);
-      const target = formation + Math.max(0, f.d-4.4)*0.34;
-      heightData[y*HM+x] = Math.min(h, lerp(h, Math.min(h, target), w));
+      heightData[y*HM+x] = carveOne(f, heightData[y*HM+x]);
     }
   }
 }
@@ -6313,6 +6353,15 @@ const BRANCH_CTRL = [
   [ -19.50,  82.00],   // the tip: ~26 m out, pointed at the pillar bearing
   [ -12.50,  78.20],   // handle — continues the line toward the crag
 ];
+function spurDist(x, z){                         // horizontal distance to the footbridge spur polyline (riverstamps' exemption)
+  let m = 1e9;
+  for(let i=1;i<SPUR_PTS.length;i++){
+    const a = SPUR_PTS[i-1], b = SPUR_PTS[i], ex = b[0]-a[0], ez = b[1]-a[1], L2 = ex*ex + ez*ez || 1;
+    const u = clamp(((x-a[0])*ex + (z-a[1])*ez)/L2, 0, 1), dx = x - a[0] - ex*u, dz = z - a[1] - ez*u;
+    const d2 = dx*dx + dz*dz; if(d2 < m) m = d2;
+  }
+  return Math.sqrt(m);
+}
 const SPUR_PTS = (()=>{ const a=[]; for(let i=0;i<=120;i++){ const p=catmull(SPUR_CTRL,i/120); a.push(p);} return a; })();
 const BRANCH_PTS = (()=>{ const a=[]; for(let i=0;i<=48;i++){ const p=catmull(BRANCH_CTRL,i/48); a.push(p);} return a; })();
 function pathDistance(x,z){
@@ -6338,6 +6387,41 @@ function sampleNormal(x,z,e){
   e = e||2.4;
   const l=sampleHeight(x-e,z), r=sampleHeight(x+e,z);
   const d=sampleHeight(x,z-e), u=sampleHeight(x,z+e);
+  const nx=l-r, ny=2*e, nz=d-u; const L=Math.hypot(nx,ny,nz);
+  return {x:nx/L, y:ny/L, z:nz/L};
+}
+
+/*  2026-10-22 — the ground as it was BEFORE the exact river field (the old snapped one), for scatterTrees' draw-count
+    decisions only.  Every height texel is a pointwise pipeline (terrainAt → trackAdjust → carveOne; the crag freeze is
+    > 535 m from the river), so a texel is re-baked on demand with the snapped field and memoised (Float32 rounding
+    at every stage, like heightData).  Every texel in the world moves a little (the sea-level term waterLevel(t) reads
+    t, which the exact pass also changes), so there is no distance cut-off; texels inside the crag freeze (46 m) read
+    heightData (the 0.0x m wl(t) shift there is accepted: a flipped filter would show in the tree dump).  Returns heightData unchanged when ?exactriver=0.  */
+const _hS = new Map();
+function texelS(ix, iy){
+  const k = iy*HM+ix;
+  if(!dfDistS) return heightData[k];
+  let v = _hS.get(k);
+  if(v !== undefined) return v;
+  const wx = ((ix+0.5)/HM)*WS-HALF, wz = ((iy+0.5)/HM)*WS-HALF;
+  if(Math.hypot(wx-CRAG_POS.x, wz-CRAG_POS.z) < 46) v = heightData[k];   // the freeze writes only inside 46 m (k = 1 − smoothstep(34,46,d))
+  else {
+    v = Math.fround(terrainAt(wx, wz, true));
+    if(TRACK){ const f = TRACK.field(wx, wz); if(f.d < 34) v = Math.fround(trackAdjust(wx, wz, v)); v = Math.fround(carveOne(f, v)); }
+  }
+  _hS.set(k, v); return v;
+}
+function sampleHeightS(x,z){
+  const fx = clamp((x+HALF)/WS*HM - 0.5, 0, HM-1.001);
+  const fy = clamp((z+HALF)/WS*HM - 0.5, 0, HM-1.001);
+  const x0=fx|0, y0=fy|0, tx=fx-x0, ty=fy-y0;
+  return lerp(lerp(texelS(x0,y0),texelS(x0+1,y0),tx),
+              lerp(texelS(x0,y0+1),texelS(x0+1,y0+1),tx), ty);
+}
+function sampleNormalS(x,z,e){
+  e = e||2.4;
+  const l=sampleHeightS(x-e,z), r=sampleHeightS(x+e,z);
+  const d=sampleHeightS(x,z-e), u=sampleHeightS(x,z+e);
   const nx=l-r, ny=2*e, nz=d-u; const L=Math.hypot(nx,ny,nz);
   return {x:nx/L, y:ny/L, z:nz/L};
 }
@@ -8947,6 +9031,29 @@ function buildRiverGeometry(){
   const dat = new Float32Array((NL+1)*(NC+1)*4);   // across(-1..1), t, speed, bankDist
   const flw = new Float32Array((NL+1)*(NC+1)*2);
   const idx = [];
+  /*  watershore (R2): the ribbon's outer edge was a fixed ±riverWidth, but the ground meets the waterline 3-4 m further out
+      (edge vertices hovered a median 0.42 m above the ground: bare strip + a straight lip).  Per section and side, find where
+      the ground reaches the waterline, +0.5 m so the edge tucks under it, widest of 5 sections, then a 9-section mean.  */
+  const SHORE = FIX_WATERSHORE ? (()=>{
+    const raw = [new Float32Array(NL+1), new Float32Array(NL+1)];
+    for(let i=0;i<=NL;i++){
+      const pi = clamp(Math.round((i/NL)*(RIVER_PTS.length-1)), 1, RIVER_PTS.length-2), p = RIVER_PTS[pi];
+      const pm = RIVER_PTS[Math.max(0,pi-4)], pp = RIVER_PTS[Math.min(RIVER_PTS.length-1,pi+4)];
+      let tx = pp.x-pm.x, tz = pp.z-pm.z; const L=Math.hypot(tx,tz)||1; tx/=L; tz/=L;
+      const nx=-tz, nz=tx, w=riverWidth(p.t), y=waterLevel(p.t);
+      for(let s=0;s<2;s++){ const sg = s?1:-1; let sh = w;
+        for(let m=0.5; m<=w+10; m+=0.25){ if(sampleHeight(p.x+nx*sg*m, p.z+nz*sg*m) >= y){ sh = m; break; } }
+        raw[s][i] = clamp(sh+0.5, 2.0, w+10);
+      }
+    }
+    const out = [new Float32Array(NL+1), new Float32Array(NL+1)];
+    for(let s=0;s<2;s++){
+      const mx = new Float32Array(NL+1);
+      for(let i=0;i<=NL;i++){ let v=0; for(let d=-2;d<=2;d++) v=Math.max(v, raw[s][clamp(i+d,0,NL)]); mx[i]=v; }
+      for(let i=0;i<=NL;i++){ let a=0; for(let d=-4;d<=4;d++) a+=mx[clamp(i+d,0,NL)]; out[s][i]=a/9; }
+    }
+    return out;
+  })() : null;
   let k=0, k4=0, k2=0;
   for(let i=0;i<=NL;i++){
     const t = i/NL;
@@ -8961,7 +9068,8 @@ function buildRiverGeometry(){
     const spd = 0.9 + 2.6*(12.0/Math.max(w,6.0));
     for(let j=0;j<=NC;j++){
       const a = j/NC*2-1;
-      const px = p.x + nx*a*w, pz = p.z + nz*a*w;
+      const ws = SHORE ? SHORE[a<0?0:1][i] : w;
+      const px = p.x + nx*a*ws, pz = p.z + nz*a*ws;
       pos[k++]=px; pos[k++]=y - Math.abs(a)*0.06; pos[k++]=pz;
       dat[k4++]=a; dat[k4++]=p.t; dat[k4++]=spd; dat[k4++]=w;
       flw[k2++]=tx; flw[k2++]=tz;
@@ -9078,7 +9186,7 @@ void main(){
     // bank look like it is lying on moving water instead of printed on it
     su += vec2(N.x*0.026, N.z*0.115);
     vec3 pr = texture(uReflect, clamp(su, vec2(0.002), vec2(0.998))).rgb;
-    float valid = 1.0 - smoothstep(4.0, 26.0, abs(P.y - uReflectPlane));
+    float valid = 1.0 - smoothstep(${FIX_REFLPLANE ? '2.5, 9.0' : '4.0, 26.0'}, abs(P.y - uReflectPlane));
     valid *= smoothstep(0.0,0.05,su.x)*smoothstep(1.0,0.95,su.x)
            * smoothstep(0.0,0.05,su.y)*smoothstep(1.0,0.95,su.y);
     haveRefl = valid;
@@ -9657,8 +9765,17 @@ function scatterTrees(){
   const railTrees = !(typeof QS !== 'undefined' && QS.get('railtrees') === '0');
   const add=(kind,x,z,scale,rot,hue,phase)=>{
     if(railTrees && TRACK && TRACK.field(x,z).d < 5) return;
+    if(dfDistS && (sampleHeight(x,z) < waterLevel(riverField(x,z).t) - 0.5 || sampleNormal(x,z,4).y < 0.55)){   // 2026-10-22: the NEW ground puts it under water / on a cliff (measured: 0 trees today)
+      (window.__TREESKIP = window.__TREESKIP || []).push({kind,x,z}); return; }
     (groups[kind] = groups[kind]||[]).push({x,z,scale,rot,hue,phase,kind});
   };
+  /*  2026-10-22 RIVERBANK — the exact river field changes the ground near the river a little, and the woods' draw
+      counts depend on filters that read it (an early `continue` skips the later draws), so ONE flipped filter
+      re-places every later tree (835 of 2059 moved, 2026-10-14).  Every filter below therefore reads the OLD snapped
+      field and ground (rfD / hD / nD), so the rng stream is exactly the old one; a tree whose NEW spot is in the
+      water or on a too steep bank is skipped afterwards, in `add`, after all of its draws (like the rail skip).
+      ?exactriver=0: rfD/hD/nD ARE riverField/sampleHeight/sampleNormal and nothing is skipped — the old bytes.      */
+  const rfD = riverFieldS, hD = sampleHeightS, nD = sampleNormalS;
   const r = rng(31337);
   const cx = CFG.spawn.x, cz = CFG.spawn.z;
 
@@ -9680,7 +9797,7 @@ function scatterTrees(){
     const x = p.x - tz*off*sgn, z = p.z + tx*off*sgn;
     const d = Math.hypot(x-cx, z-cz);
     if(d > 700) continue;
-    const rf = riverField(x,z);
+    const rf = rfD(x,z);
     if(rf.d < riverWidth(rf.t)+2) continue;
     add(r()<0.72?'willow':'broadleaf', x, z, 0.7+r()*0.6, r()*TAU, r(), r()*10);
   }
@@ -9695,10 +9812,10 @@ function scatterTrees(){
     for(let i=0;i<n;i++){
       const x = gx + (r()-0.5)*spread*2, z = gz + (r()-0.5)*spread*2;
       if(Math.abs(x)>1180||Math.abs(z)>1180) continue;
-      const nrm = sampleNormal(x,z,4);
+      const nrm = nD(x,z,4);
       if(nrm.y < 0.72) continue;
-      const rf = riverField(x,z);
-      const h = sampleHeight(x,z);
+      const rf = rfD(x,z);
+      const h = hD(x,z);
       if(h < waterLevel(rf.t)+2.6) continue;
       if(Math.hypot(x-VILLAGE.x, z-VILLAGE.z) < VILLAGE.r*0.75) continue;
       if(Math.hypot(x-BRIDGE.x, z-BRIDGE.z) < 60) continue;
@@ -9713,10 +9830,10 @@ function scatterTrees(){
   for(let i=0;i<130;i++){
     const a=r()*TAU, rr=60+Math.pow(r(),0.7)*260;
     const x=VILLAGE.x+Math.cos(a)*rr, z=VILLAGE.z+Math.sin(a)*rr;
-    const nrm=sampleNormal(x,z,4);
+    const nrm=nD(x,z,4);
     if(nrm.y<0.80) continue;
-    const rf=riverField(x,z);
-    if(sampleHeight(x,z) < waterLevel(rf.t)+3) continue;
+    const rf=rfD(x,z);
+    if(hD(x,z) < waterLevel(rf.t)+3) continue;
     add(r()<0.3?'poplar':'broadleaf', x, z, 0.55+r()*0.5, r()*TAU, r(), r()*10);
   }
   return groups;
@@ -9813,7 +9930,7 @@ function binTrees(cp, one){
     in ~3,000 individually-shaped stones over a solid mortar core.            */
 
 const BR = (()=>{
-  const rf = riverField(BRIDGE.x, BRIDGE.z);
+  const rf = riverFieldS(BRIDGE.x, BRIDGE.z);   // 2026-10-22: the viaduct keeps its familiar height with the exact river field on
   const water = waterLevel(rf.t);
   return {
     ax: BRIDGE_AXIS, pp: BRIDGE_PERP,
@@ -10150,7 +10267,7 @@ function buildTrack(){
   pts.forEach(p=>p.t = p.s/total);
 
   // raw ground, then a railway engineer's grading pass
-  for(const p of pts) p.y = terrainAt(p.x, p.z) + 0.9;
+  for(const p of pts) p.y = terrainAt(p.x, p.z, true) + 0.9;   // 2026-10-22: graded on the old snapped ground, so the rail (and train) do not move when the exact river field is on
   for(let pass=0; pass<7; pass++){
     const src = pts.map(p=>p.y);
     for(let i=0;i<pts.length;i++){
@@ -17889,6 +18006,7 @@ async function boot(){
   /*── trees ──*/
   setStat('planting the woods', 0.74); await idle();
   const groups = scatterTrees();
+  _hS.clear();   // 2026-10-22: the snapped-ground memo is only for scatterTrees' filters
   const heightOf = { broadleaf:11.5, pine:14.5, poplar:15.0, willow:9.5 };
   const flexOf   = { broadleaf:1.0, pine:0.52, poplar:0.80, willow:1.75 };
   const sampleLo = (x, z) => {
@@ -19449,7 +19567,8 @@ function shadowPass(){
 
 const _mirror = new THREE.Matrix4();
 function reflectionPass(){
-  const planeY = BR.water;
+  const planeY = FIX_REFLPLANE ? waterLevel(riverField(camera.position.x, camera.position.z).t) : BR.water;   // R2: the local water level
+  waterMesh.material.uniforms.uReflectPlane.value = planeY;
   if(camera.position.y < planeY + 0.5){ waterMesh.material.uniforms.uReflectOn.value = 0; return; }
   const m = _mirror.set(1,0,0,0, 0,-1,0,2*planeY, 0,0,1,0, 0,0,0,1);
   reflCam.matrixWorld.multiplyMatrices(m, camera.matrixWorld);
