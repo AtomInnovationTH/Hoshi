@@ -4931,6 +4931,14 @@ const RIVER_EXACT = !/[?&]exactriver=0(?:&|$)/.test(location.search);   // 2026-
       riverstamps the village terrace / spawn knoll no longer lift the river bed and bank (was: bed 1.6 m deep instead of 3.4 m at idx 460-640)  */
 const _fl = n => !new RegExp('[?&]'+n+'=0(?:&|$)').test(location.search);
 const FIX_WATERSHORE = _fl('watershore'), FIX_SHOREGRASS = _fl('shoregrass'), FIX_REFLPLANE = /[?&]reflplane=1(?:&|$)/.test(location.search), FIX_RIVERSTAMPS = _fl('riverstamps');
+/*  calmwater v3 (2026-10-25): from above the river was 'leopard-spotted'.  Cause: the ripple normal (slopes up to ~60 deg, four noise octaves down
+    to 0.4 m wavelength) fed the Fresnel mix and the sky-reflection direction per pixel, so facets smaller than a few pixels flipped between dark
+    body colour and tan horizon sky = aliased noise (project rule: detail smaller than a dot is filtered, not kept).  Fix: every ripple octave's
+    contribution to the normal (and the glint / ribbon / caustic / foam noise) is faded by its own PIXEL FOOTPRINT vs wavelength (dFdx of the world
+    position), so there is no distance ring and resolvable ripples stay.  The slope variance the filter removed comes back as ROUGHNESS: sky
+    reflection averaged over a cone (3 taps), Fresnel averaged over the same slope spread, sun lobe widened (energy kept).  The painted depth plates'
+    boundary meander is slowed and their edges widened (the jagged teal/navy edge).  ?calmwater=0 = the previous shader text.  */
+const FIX_CALMWATER = _fl('calmwater');
 let dfDistS = null, dfTS = null;                 // the snapped copy (only kept when the exact pass replaces it)
 {
   // seed
@@ -9126,7 +9134,15 @@ float ripple(vec2 q, float t, float sp, float gust){
   return n1*0.52 + n2*0.30 + n3*0.17 + n4*0.30;
 }
 
-void main(){
+${FIX_CALMWATER ? `// the four ripple() octaves, weighted but NOT summed, so each can be filtered by its own footprint
+vec4 rippleO(vec2 q, float t, float sp, float gust){
+  return vec4(pn2(vec2(q.x*0.049 - t*sp*0.055, q.y*0.40))*0.52,
+              pn2(vec2(q.x*0.121 - t*sp*0.115, q.y*0.92) + 7.0)*0.30,
+              pn2(vec2(q.x*0.315 - t*sp*0.255, q.y*2.30) + 19.0)*0.17,
+              pn2(vec2(q.x*1.15 - t*2.4, q.y*1.05 + t*0.7) + 31.0)*gust*0.30);
+}
+
+` : ``}void main(){
   vec3 P = vW;
   vec3 V = normalize(uCamPos - P);
   vec2 fl = normalize(vF); vec2 cr = vec2(-fl.y, fl.x);
@@ -9137,20 +9153,41 @@ void main(){
 
   vec2 q = vec2(dot(P.xz, fl), dot(P.xz, cr));
   float e = 0.42;
-  float h0 = ripple(q, uTime, sp, gust);
+${FIX_CALMWATER ? `  // pixel footprint (m) along / across the flow; cycles of each octave that one pixel spans
+  vec2 dPx = dFdx(P.xz), dPy = dFdy(P.xz);
+  vec2 fpq = vec2(abs(dot(dPx,fl)) + abs(dot(dPy,fl)), abs(dot(dPx,cr)) + abs(dot(dPy,cr)));
+  vec4 oFx = vec4(0.049, 0.121, 0.315, 1.15), oFy = vec4(0.40, 0.92, 2.30, 1.05);
+  vec4 cyc = max(fpq.x*oFx, fpq.y*oFy);
+  float cwW = smoothstep(0.30, 0.55, V.y);   // view steepness (no distance term): grazing => 0 => exactly the old maths
+  vec4 wo = mix(vec4(1.0), 1.0 - smoothstep(vec4(0.035), vec4(0.12), cyc), cwW);
+  vec4 o0 = rippleO(q, uTime, sp, gust);
+  vec4 ox = rippleO(q + vec2(e,0.0), uTime, sp, gust);
+  vec4 oy = rippleO(q + vec2(0.0,e), uTime, sp, gust);
+` : `  float h0 = ripple(q, uTime, sp, gust);
   float hx = ripple(q + vec2(e,0.0), uTime, sp, gust);
   float hy = ripple(q + vec2(0.0,e), uTime, sp, gust);
-  float amp = mix(0.055, 0.20, clamp(sp*0.22,0.0,1.0)) * (0.55 + 0.9*gust);
+`}  float amp = mix(0.055, 0.20, clamp(sp*0.22,0.0,1.0)) * (0.55 + 0.9*gust);
   // shallower water is choppier at the edges
   amp *= mix(1.35, 1.0, smoothstep(0.55, 0.9, abs(across)) * 0.0 + 0.5);
-  vec2 dh = vec2(hx-h0, hy-h0)/e * amp * 14.0;
-  vec3 N = normalize(vec3(-(dh.x*fl.x + dh.y*cr.x), 1.0, -(dh.x*fl.y + dh.y*cr.y)));
+${FIX_CALMWATER ? `  vec2 dh = vec2(dot(wo, ox-o0), dot(wo, oy-o0))/e * amp * 14.0;
+  // slope variance of the octaves the footprint filtered away (expected, not per pixel: smooth) -> roughness
+  vec4 oSa = vec4(0.52, 0.30, 0.17, 0.30*gust);
+  vec4 oVx = oSa*0.36*sqrt(2.0*(1.0 - exp(-pow(oFx*e*2.2, vec4(2.0)))))/e;
+  vec4 oVy = oSa*0.36*sqrt(2.0*(1.0 - exp(-pow(oFy*e*2.2, vec4(2.0)))))/e;
+  float rough = amp*14.0*sqrt(max(dot(1.0 - wo*wo, oVx*oVx + oVy*oVy), 0.0));
+` : `  vec2 dh = vec2(hx-h0, hy-h0)/e * amp * 14.0;
+`}  vec3 N = normalize(vec3(-(dh.x*fl.x + dh.y*cr.x), 1.0, -(dh.x*fl.y + dh.y*cr.y)));
   // flatten the normal with distance so the far river doesn't shimmer to noise
   N = normalize(mix(N, vec3(0.0,1.0,0.0), smoothstep(120.0, 520.0, vDist)*0.75));
-
+${FIX_CALMWATER ? `  vec2 dhR = dh*mix(1.0, 0.07, cwW);
+  vec3 Nr = normalize(vec3(-(dhR.x*fl.x + dhR.y*cr.x), 1.0, -(dhR.x*fl.y + dhR.y*cr.y)));
+  Nr = normalize(mix(Nr, vec3(0.0,1.0,0.0), smoothstep(120.0, 520.0, vDist)*0.75));
+  rough *= mix(1.0, 1.3, cwW);
+` : ``}
   float ndl = dot(N, uSunDir);
-  float sh = sunShadow(P, N, ndl) * cloudShadow(P);
-
+${FIX_CALMWATER ? `  float sh = mix(1.0, sunShadow(P, N, ndl), mix(1.0, 0.55, smoothstep(0.30, 0.55, V.y))) * cloudShadow(P);
+` : `  float sh = sunShadow(P, N, ndl) * cloudShadow(P);
+`}
   // ── depth-graded body colour, in bands ─────────────────────────────────
   // Painted water is not a smooth gradient; it is a few flat plates of colour
   // whose boundaries you can point at, and which follow the CHANNEL rather than
@@ -9172,20 +9209,30 @@ void main(){
   // caustic light rocking over the shallow bed
   float caus = pn2(vec2(q.x*1.7 - uTime*sp*0.8, q.y*2.9 + uTime*0.5));
   caus = pow(clamp(caus*0.5+0.5, 0.0, 1.0), 3.0);
-  body += ${C.wSpark}*caus*0.20*(1.0 - smoothstep(0.05, 0.40, bedDepth))*sh;
+${FIX_CALMWATER ? `  caus = mix(0.15, caus, mix(1.0, 1.0 - smoothstep(0.12, 0.40, max(fpq.x*1.7, fpq.y*2.9)), cwW));
+` : ``}  body += ${C.wSpark}*caus*0.20*(1.0 - smoothstep(0.05, 0.40, bedDepth))*sh;
 
   // ── reflection ─────────────────────────────────────────────────────────
-  vec3 R = reflect(-V, N);
-  vec3 skyRefl = skyDomeLite(normalize(vec3(R.x, max(R.y, 0.012), R.z)));
-  vec3 refl = skyRefl;
+${FIX_CALMWATER ? `  vec3 Rg = reflect(-V, N);   // glints keep the full ripple slope
+  vec3 R = reflect(-V, Nr);
+` : `  vec3 R = reflect(-V, N);
+`}  vec3 skyRefl = skyDomeLite(normalize(vec3(R.x, max(R.y, 0.012), R.z)));
+${FIX_CALMWATER ? `  if(rough > 0.02){
+    float rs = rough*1.5;
+    vec3 sU = skyDomeLite(normalize(vec3(R.x, max(R.y + rs, 0.012), R.z)));
+    vec3 sD = skyDomeLite(normalize(vec3(R.x, max(R.y - rs, 0.012), R.z)));
+    skyRefl = skyRefl*0.5 + (sU + sD)*0.25;
+  }
+` : ``}  vec3 refl = skyRefl;
   float haveRefl = 0.0;
   if(uReflectOn > 0.5){
     vec2 su = vScr.xy/vScr.w*0.5 + 0.5;
     // a real reflection smears ALONG the view, not across it: displacing the
     // lookup far more vertically than horizontally is what makes a mirrored
     // bank look like it is lying on moving water instead of printed on it
-    su += vec2(N.x*0.026, N.z*0.115);
-    vec3 pr = texture(uReflect, clamp(su, vec2(0.002), vec2(0.998))).rgb;
+${FIX_CALMWATER ? `    su += vec2(Nr.x*0.026, Nr.z*0.115);
+` : `    su += vec2(N.x*0.026, N.z*0.115);
+`}    vec3 pr = texture(uReflect, clamp(su, vec2(0.002), vec2(0.998))).rgb;
     float valid = 1.0 - smoothstep(${FIX_REFLPLANE ? '2.5, 9.0' : '4.0, 26.0'}, abs(P.y - uReflectPlane));
     valid *= smoothstep(0.0,0.05,su.x)*smoothstep(1.0,0.95,su.x)
            * smoothstep(0.0,0.05,su.y)*smoothstep(1.0,0.95,su.y);
@@ -9195,12 +9242,20 @@ void main(){
   // Stylised water keeps its own colour at grazing angles rather than becoming
   // a mirror of the warm horizon haze — but when we actually HAVE the mirrored
   // bank to show, it earns a good deal more of the surface.
-  float fres = 0.035 + 0.70*pow(1.0 - clamp(dot(N,V),0.0,1.0), 4.0);
-  fres = clamp(fres, 0.0, 0.46 + 0.26*haveRefl);
+${FIX_CALMWATER ? `  vec3 Vh = normalize(vec3(V.x, 0.0, V.z) + vec3(1e-5, 0.0, 0.0));
+  float fc0 = clamp(dot(Nr,V),0.0,1.0), fc1 = clamp(dot(normalize(Nr + Vh*rough*0.6),V),0.0,1.0), fc2 = clamp(dot(normalize(Nr - Vh*rough*0.6),V),0.0,1.0);
+  float fCap = 0.46 + 0.26*haveRefl;   // the cap is applied per slope sample, as it was per facet before
+  float fres = 0.5*min(0.035 + 0.70*pow(1.0 - fc0, 4.0), fCap) + 0.25*min(0.035 + 0.70*pow(1.0 - fc1, 4.0), fCap) + 0.25*min(0.035 + 0.70*pow(1.0 - fc2, 4.0), fCap);
+` : `  float fres = 0.035 + 0.70*pow(1.0 - clamp(dot(N,V),0.0,1.0), 4.0);
+`}  fres = clamp(fres, 0.0, 0.46 + 0.26*haveRefl);
 
-  vec3 col = mix(body, refl, fres*0.86);
+${FIX_CALMWATER ? `  float shK = sh*0.82 + 0.18;
+  vec3 bodyS = mix(body*0.74 + K_SHADOW*0.10, body, shK);
+  vec3 reflS = mix(refl*0.74 + K_SHADOW*0.10, refl, 1.0 - (1.0 - shK)*mix(1.0, 0.3, cwW));
+  vec3 col = mix(bodyS, reflS, fres*0.86);
+` : `  vec3 col = mix(body, refl, fres*0.86);
   col = mix(col*0.74 + K_SHADOW*0.10, col, sh*0.82 + 0.18);
-
+`}
   // ── flow ribbons ───────────────────────────────────────────────────────
   // Long, thin, current-aligned creases are the single most recognisable thing
   // about painted river water: they show you which way it is going without any
@@ -9210,22 +9265,31 @@ void main(){
     float r2 = pn2(vec2(q.x*0.155 - uTime*sp*0.17, q.y*1.05) + 41.0);
     float rib = smoothstep(0.28, 0.62, abs(r1)*0.75 + abs(r2)*0.45);
     float bright = smoothstep(0.0, 0.5, r1 + r2);
-    col = mix(col, mix(${C.wDeepShade}, ${C.wSpark}, bright), rib*0.16*(0.4+0.6*sh));
+${FIX_CALMWATER ? `    float wr = mix(1.0, 1.0 - smoothstep(0.12, 0.40, max(fpq.x*0.155, fpq.y*1.05)), cwW);
+    rib = mix(0.20, rib, wr); bright = mix(0.5, bright, wr);
+` : ``}    col = mix(col, mix(${C.wDeepShade}, ${C.wSpark}, bright), rib*0.16*(0.4+0.6*sh));
   }
 
   // ── quantised sun glitter ──────────────────────────────────────────────
-  float f = dot(normalize(R), uSunDir);
-  float broad = pow(max(f, 0.0), 22.0);
-  float glintN = pn2(q*vec2(1.9, 3.6) - vec2(uTime*sp*1.1, uTime*0.35))*0.5+0.5;
-  float twinkle = step(0.42, glintN) * (0.55 + 0.75*pn2(q*7.0 - uTime*2.0));
-  float glint = smoothstep(0.9975, 0.99925, f) * twinkle;
+${FIX_CALMWATER ? `  float f = dot(Rg, uSunDir);
+` : `  float f = dot(normalize(R), uSunDir);
+`}${FIX_CALMWATER ? `  float bN = 22.0/(1.0 + 6.0*rough*rough);
+  float broad = pow(max(f, 0.0), bN)*bN/22.0;
+` : `  float broad = pow(max(f, 0.0), 22.0);
+`}  float glintN = pn2(q*vec2(1.9, 3.6) - vec2(uTime*sp*1.1, uTime*0.35))*0.5+0.5;
+${FIX_CALMWATER ? `  float gw = 0.5*smoothstep(0.10, 0.50, max(fpq.x*1.9, fpq.y*3.6))*cwW;
+  float w7 = mix(1.0, 1.0 - smoothstep(0.12, 0.40, max(fpq.x, fpq.y)*7.0), cwW);
+  float twinkle = smoothstep(0.419 - gw, 0.42 + gw, glintN) * (0.55 + 0.75*w7*pn2(q*7.0 - uTime*2.0));
+` : `  float twinkle = step(0.42, glintN) * (0.55 + 0.75*pn2(q*7.0 - uTime*2.0));
+`}  float glint = smoothstep(0.9975, 0.99925, f) * twinkle;
   float glitterPath = smoothstep(0.55, 1.0, dot(normalize(vec2(V.x,V.z)), -normalize(uSunDir.xz)));
   col += ${C.wSpark} * (glint*2.6 + broad*0.42) * sh * (0.35 + 0.75*glitterPath);
 
   // ── foam ───────────────────────────────────────────────────────────────
   float edge = smoothstep(0.88, 1.0, abs(across));
   float scal = pn2(vec2(q.x*0.85 - uTime*sp*0.7, q.y*2.2))*0.5+0.5;
-  float foam = smoothstep(0.42, 0.96, edge*(0.50+0.95*scal));
+${FIX_CALMWATER ? `  scal = mix(0.5, scal, mix(1.0, 1.0 - smoothstep(0.12, 0.40, max(fpq.x*0.85, fpq.y*2.2)), cwW));
+` : ``}  float foam = smoothstep(0.42, 0.96, edge*(0.50+0.95*scal));
   for(int i=0;i<8;i++){
     if(i>=uPierN) break;
     vec2 dpz = P.xz - uPiers[i].xy;
@@ -11150,6 +11214,12 @@ function buildVillage(){
     const yaw=Math.atan2(tx,tz);
     pushSolid(x, z, 3.1, 3.9, yaw, y+8.4);   // top = mill roof ridge y+6.0+2.4 (§W2 height-bounded)
     pbox(M, x, y+3.0, z, 3.0, 3.0, 3.8, yaw, LC('wallB'), 0);
+    if(State.millfound){   // MILLFOUND — fill the air under the walls: foundation to the lowest of 9 footprint samples − 0.3
+      const fc=Math.cos(yaw), fs=Math.sin(yaw); let gLo=Infinity;
+      for(const a of [-1,0,1]) for(const b of [-1,0,1]){ const [ox,oz]=rotY(a*3.05, b*3.85, fc, fs); gLo=Math.min(gLo, sampleHeight(x+ox, z+oz)); }
+      const fb=gLo-0.3;
+      if(y-fb > 0.1) pbox(M, x, (y+0.05+fb)/2, z, 3.05, (y+0.05-fb)/2, 3.85, yaw, tint(LC('sB'),0.85), 0);
+    }
     proof(M, x, y+6.0, z, 3.3, 4.1, 2.4, yaw, LC('thatch'), 4);   // §W6-F3: mat 4 = roof
     pbox(M, x, y+2.6, z, 3.1, 0.9, 3.9, yaw, tint(LC('timber'),0.9), 0);
     return { x, y:y+2.4, z, yaw, r:2.6, tx, tz };
@@ -16574,6 +16644,7 @@ const State = {
     treestill: qsBool('treestill', true),  // §25.11 mid-range vegetation stillness — continuous LOD comp (F-A), angular motion fades (F-B), wind-origin snap (F-C).  DEFAULT-ON per the human's standing order (2026-08-24); ?treestill=0 restores today's behaviour exactly
     crown2:    qsBool('crown2', true),     // §31.WALL S2 — near-lens dither-fade of tree geometry within 0.6 m of the eye: brushing a crown reads as leaves, never a flat hollow shell.  Defect fix, default ON; ?crown2=0 escape (uCrown2=0 ⇒ the FS discard is dead code, byte-identical frame)
     kept:      qsBool('kept', true),       // §31.STEADY W3 — THE KEPT VILLAGE: grass kept short in the yards (0.42) and trodden at the walls (×0.55) of every village SOLID + the lane ribbon, so no lit pane glows through chest-high blades ("a few windows still jittering" / "Nearby houses" = the veil, measured).  Defect fix, default ON; ?kept=0 ⇒ no map, grass shader byte-identical
+    millfound: qsBool('millfound', true),  // MILLFOUND — the watermill gets a stone foundation down to the lowest ground under its footprint (it hovered 1.4 m over the bank beside the viaduct pier).  No placement/rng change.  ?millfound=0 = old
     sill:      qsBool('sill', true),       // §31.STEADY W3 — village windows' low row lifted off the ground (sill ≥ 0.55 m; a hut keeps one row).  LAW 12 continuity + the last of the veil.  Default ON; ?sill=0 restores the 0.42·ht row byte-identically (same rng draw)
     treekill:  qsBool('treekill', true),   // §31.STEADY S3v2 — the tree oscillator kill band moves inward to 60→110 m (was 120→150, §31.WALL S3): the only animated mover left at mid range in flight ("still tremble" / "flying + mid-distance"; shadows/clouds/wind bisected null).  Default ON; ?treekill=0 ⇒ uTreeKill (120,150) = the S3 arithmetic exactly
     fastfade:  qsBool('fastfade', true),   // §FASTFADE (2026-10-20) — tree clump sway + leaf flutter (the 1.7-3.5x faster terms) fade out 35→50 m; the slow trunk sway keeps the 60→110 m mfade
