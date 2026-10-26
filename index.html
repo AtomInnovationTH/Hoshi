@@ -115,6 +115,25 @@
     letter-spacing:.2em;text-transform:uppercase;opacity:0;transition:.4s;backdrop-filter:blur(10px);
     border:1px solid rgba(246,236,216,.14);pointer-events:none}
   #toast.on{opacity:.9}
+  /* §WN — what's-new card (click-through, like #toast) + new-version prompt (tappable) */
+  #wn{position:fixed;left:50%;top:84px;transform:translateX(-50%);z-index:41;width:max-content;
+    max-width:min(440px,84vw);background:rgba(20,27,38,.92);padding:14px 24px 15px;border-radius:22px;
+    text-align:center;backdrop-filter:blur(10px);border:1px solid rgba(143,190,168,.5);
+    opacity:0;transition:.4s;pointer-events:none}
+  #wn.sm{padding:9px 18px 10px;border-radius:16px}
+  #wn.sm b{margin-bottom:5px}
+  #wn.sm p{font-size:12px;line-height:1.4;margin:1px 0}
+  #wn.on{opacity:.92}
+  #wn b{display:block;font-weight:normal;font-size:11px;letter-spacing:.2em;text-transform:uppercase;
+    margin-bottom:8px;opacity:.75}
+  #wn p{margin:3px 0;font-size:13px;line-height:1.55;letter-spacing:.03em}
+  #upd{position:fixed;left:50%;bottom:calc(70px + env(safe-area-inset-bottom));   /* above the quest chip (#chip, bottom 30px) */transform:translateX(-50%);
+    z-index:42;display:flex;align-items:center;gap:12px;background:rgba(20,27,38,.85);
+    padding:9px 12px 9px 20px;border-radius:999px;font-size:11px;letter-spacing:.2em;
+    text-transform:uppercase;backdrop-filter:blur(10px);border:1px solid rgba(143,190,168,.5);
+    opacity:0;transition:.4s;cursor:pointer;-webkit-tap-highlight-color:transparent;pointer-events:none}
+  #upd.on{opacity:.95;pointer-events:auto}
+  #upd i{font-style:normal;padding:2px 8px;font-size:13px;opacity:.6;letter-spacing:0}
   #err{position:fixed;inset:0;z-index:60;display:none;padding:40px;background:#171d27;
     font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.7;
     color:#E8A0A0;white-space:pre-wrap;overflow:auto}
@@ -4127,6 +4146,15 @@ three/build/three.module.js:
 <script type="module">
 const THREE = window.THREE;   // offline build: vendored global, no importmap, no network
 window.__HOSHI_MOD = true;   // the module reached the body: real boot can proceed
+
+/* §WN — BUMP BEFORE EVERY PUBLISH: id (date) + 1–3 plain notes.  Returning players see
+   these once in a small "Hoshi was updated" card; first-time players never do.
+   Test it: ?whatsnew=1 forces the card · ?whatsnew=0 turns the card and the
+   new-version prompt off.  Logic: §WN block just above `go` at the file's end. */
+const RELEASE = { id: '2026-10-26', notes: [
+  'Calm water from above — no more spotty river',
+  'The watermill now stands on a stone base',
+] };
 
 window.addEventListener('error', e=>{
   const el=document.getElementById('err'); el.style.display='block';
@@ -21611,6 +21639,128 @@ function bindInput(){
     startGame();
   });
 }
+
+/*── §WN  what's-new card + new-version prompt (owner 2026-10-26: "add it") ────
+   A. RELEASE (top of this script) → a one-time card for RETURNING players.
+      localStorage hoshi_release holds the last id shown.  None stored ⇒ either
+      a first-time player (store silently, show nothing) or a player from before
+      this feature (hoshi_seen/hoshi_ob exist ⇒ treated as returning, so the
+      very first release is announced too).  The card is click-through
+      (pointer-events:none) and listens passively on window, so it never eats
+      the click that starts pointer lock; any click/tap/key dismisses it
+      (ignored for its first 1.5 s), else it fades after 10 s.
+   B. Web page only (http/https, no service worker in control): HEAD this page
+      same-origin at load and again on visibilitychange / every 30 min; a
+      changed ETag/Last-Modified raises the "new version" prompt.  Silent on any
+      failure.  Never reloads by itself.
+   C. PWA: the build's page script hands us {apply} via window.__hoshiSwUpdate /
+      the 'hoshi-sw-update' event when a new worker is waiting.
+   ?whatsnew=0 disables A–C · ?whatsnew=1 forces the card (testing).  Bench/pinned
+   URLs (PERSIST false) get nothing unless forced.  file:// makes zero requests. */
+(function whatsNew(){
+  const WN = QS.get('whatsnew');
+  if(WN === '0') return;
+  const FORCE = WN === '1';
+  if(!PERSIST && !FORCE) return;
+  const LS = { get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
+               set(k, v){ try{ localStorage.setItem(k, v); }catch(e){} } };
+  const mk = (tag, id)=>{ const e = document.createElement(tag); e.id = id; document.body.appendChild(e); return e; };
+
+  /* A — the card */
+  const stored = LS.get('hoshi_release');
+  const returning = stored !== null || !!LS.get('hoshi_seen') || !!LS.get('hoshi_ob');
+  if(stored === null && !returning && !FORCE) LS.set('hoshi_release', RELEASE.id);   // first-timer: silent
+  else if(FORCE || stored !== RELEASE.id){
+    let shown = false;
+    const tStart = performance.now();
+    const iv = setInterval(()=>{
+      const waited = performance.now() - tStart;
+      if((!window.__ready && waited > 120000) || waited > 600000){ clearInterval(iv); return; }   // never ready / lesson never ends: stop polling
+      if(!window.__ready || shown) return;
+      if(window.__OB && window.__OB.pending()) return;      // never on top of the first-steps lesson
+      shown = true; clearInterval(iv);
+      LS.set('hoshi_release', RELEASE.id);
+      const el = mk('div', 'wn');
+      const h = document.createElement('b'); h.textContent = 'Hoshi was updated'; el.appendChild(h);
+      for(const n of RELEASE.notes){ const p = document.createElement('p'); p.textContent = n; el.appendChild(p); }
+      /* placement: while the title veil is up, sit >= 60 px clear above the title block
+         (shrink the card on short screens); in-game it keeps the default top */
+      const vl = document.getElementById('veil'), kj = vl && vl.querySelector('.kanji');
+      if(vl && kj && !vl.classList.contains('gone') && vl.style.display !== 'none'){
+        const place = gap=>{ const room = kj.getBoundingClientRect().top - gap - el.offsetHeight;
+          el.style.top = Math.max(16, Math.min(84, room)) + 'px'; return room; };
+        // prefer 60 px clear of the title; on short screens trade gap (40 px) before shrinking, never < 16 px from the top
+        if(place(60) < 20 && place(40) < 20){ el.classList.add('sm'); if(place(40) < 16) place(28); }
+      }
+      requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add('on')));
+      const t0 = performance.now();
+      let gone = false, to = 0;
+      const bye = ()=>{
+        if(gone) return; gone = true; clearTimeout(to);
+        for(const ev of ['pointerdown', 'mousedown', 'touchstart', 'keydown']) removeEventListener(ev, any, true);
+        el.classList.remove('on'); setTimeout(()=>el.remove(), 500);
+      };
+      const any = ()=>{ if(performance.now() - t0 > 1500) bye(); };
+      for(const ev of ['pointerdown', 'mousedown', 'touchstart', 'keydown']) addEventListener(ev, any, { capture:true, passive:true });
+      to = setTimeout(bye, 10000);
+      window.__WN = { el, bye };
+    }, 400);
+  }
+
+  /* B/C — the prompt */
+  let upEl = null, upDismissed = null;
+  function offer(sig, apply){
+    if(upEl || (sig && sig === upDismissed)) return;
+    const el = upEl = mk('div', 'upd');
+    const t = document.createElement('span'); t.textContent = 'A new version of Hoshi is ready — tap to refresh';
+    const x = document.createElement('i'); x.textContent = '✕'; x.setAttribute('aria-label', 'dismiss');
+    el.appendChild(t); el.appendChild(x);
+    /* tappable, and never leaks the press to the veil / touch-fly handlers underneath */
+    for(const ev of ['pointerdown', 'mousedown', 'touchstart', 'touchend'])
+      el.addEventListener(ev, e=>e.stopPropagation());
+    el.addEventListener('click', e=>{
+      e.stopPropagation();
+      if(e.target === x){
+        upDismissed = sig; el.classList.remove('on'); setTimeout(()=>el.remove(), 500); upEl = null; return;
+      }
+      apply();
+    });
+    requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add('on')));
+    window.__WNUP = el;
+  }
+  const sw = navigator.serviceWorker;
+  const proto = location.protocol;
+  if((proto === 'http:' || proto === 'https:') && !(sw && sw.controller) && typeof fetch === 'function'){
+    /* validator: Last-Modified alone; ETag (W/ stripped) only when Last-Modified is absent at BOTH
+       checks; a header that appears/disappears between checks ⇒ ignore that check.  (A README-only
+       push also moves both on GitHub Pages: rare, accepted false prompt.) */
+    const probe = ()=> fetch(location.href, { method:'HEAD', cache:'no-store' }).then(r=>{
+      if(!r.ok) return null;
+      return { lm: r.headers.get('last-modified') || '', et: (r.headers.get('etag') || '').replace(/^W\//, '') };
+    }).catch(()=>null);
+    const changed = (a, b)=>{
+      if(!!a.lm !== !!b.lm || !!a.et !== !!b.et) return null;
+      if(a.lm) return a.lm !== b.lm;
+      return a.et ? a.et !== b.et : null;
+    };
+    let base = null, busy = false;
+    const base0 = probe().then(v=>{ base = v; });
+    const check = ()=>{
+      if(busy) return;                                   // one HEAD in flight at a time
+      busy = true;
+      base0.then(()=> probe()).then(cur=>{
+        if(!cur) return;
+        if(base === null){ base = cur; return; }
+        if(changed(base, cur) === true && !(sw && sw.controller)) offer(cur.lm || cur.et, ()=>location.reload());
+      }).catch(()=>{}).then(()=>{ busy = false; });
+    };
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') check(); });
+    setInterval(()=>{ if(document.visibilityState === 'visible') check(); }, 30 * 60 * 1000);
+  }
+  const swUp = ()=>{ const u = window.__hoshiSwUpdate; if(u && u.apply) offer(null, u.apply); };
+  window.addEventListener('hoshi-sw-update', swUp);
+  swUp();
+})();
 
 /*──────────────────────────── go ──────────────────────────────────────────*/
 boot().catch(e=>{
