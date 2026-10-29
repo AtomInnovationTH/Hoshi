@@ -4151,9 +4151,9 @@ window.__HOSHI_MOD = true;   // the module reached the body: real boot can proce
    these once in a small "Hoshi was updated" card; first-time players never do.
    Test it: ?whatsnew=1 forces the card · ?whatsnew=0 turns the card and the
    new-version prompt off.  Logic: §WN block just above `go` at the file's end. */
-const RELEASE = { id: '2026-10-26', notes: [
-  'Calm water from above — no more spotty river',
-  'The watermill now stands on a stone base',
+const RELEASE = { id: '2026-10-29', notes: [
+  'Houses on hillsides now sit on stone bases — no more doors sunk in the grass',
+  'The barn and the teahouse no longer float above the slope',
 ] };
 
 window.addEventListener('error', e=>{
@@ -11019,6 +11019,14 @@ function buildVillage(){
     const w = 3.0*h.s + r()*1.2, d = 4.0*h.s + r()*1.6, ht = 2.5*h.s + r()*1.3;
     const wc = wallCols[(r()*wallCols.length)|0];
     h.w=w; h.d=d; h.ht=ht; h.wc=wc;   // §W6-F1: the dressing loop reuses these (no rng — 8080 untouched)
+    if(State.housebase){   // HOUSEBASE — sample the plinth outline (8 points): lift the house only where the uphill ground rises > 0.25 up its 0.32 m plinth; the plinth then reaches gLo − 0.3 (dressing loop).  Every later use of h.y follows; no rng draw
+      const fc=Math.cos(h.yaw), fs=Math.sin(h.yaw); let gHi=-Infinity, gLo=Infinity;
+      for(const a of [-1,0,1]) for(const b of [-1,0,1]){ if(!a && !b) continue;
+        const [ox,oz]=rotY(a*(w/2+0.14), b*(d/2+0.14), fc, fs), g=sampleHeight(h.x+ox, h.z+oz);
+        if(g>gHi) gHi=g; if(g<gLo) gLo=g; }
+      h.y += Math.max(0, gHi - h.y - 0.25);
+      h.pb = Math.min(h.y, gLo - 0.3);
+    }
     const rcI = r()<0.55?0 : (r()<0.5?1:(r()<0.6?2:3));
     const rc = tint(roofCols[rcI], 0.88+r()*0.28);
     const y0 = h.y - 0.5;
@@ -11107,6 +11115,11 @@ function buildVillage(){
     }
     // plinth skirt (contact rule 5): one slab 0.14 proud, 0.32 tall — reads as
     // the 4-strip ring from every angle at a quarter of the triangles
+    if(State.housebase){   // HOUSEBASE — the same slab, reaching down to the lowest outline ground − 0.3 (same r2 draws)
+      const pb=h.pb, pt=h.y+0.32;
+      pbox(M, h.x, (pb+pt)/2, h.z, w/2+0.14, (pt-pb)/2, d/2+0.14, h.yaw,
+           tint([LC('sA'),LC('sB'),LC('sD')][(r2()*3)|0], 0.92+r2()*0.16), 0);
+    } else
     pbox(M, h.x, h.y+0.16, h.z, w/2+0.14, 0.16, d/2+0.14, h.yaw,
          tint([LC('sA'),LC('sB'),LC('sD')][(r2()*3)|0], 0.92+r2()*0.16), 0);
     // one prop on ~60% of houses, yaw/scale-jittered so nothing repeats (#9)
@@ -11158,7 +11171,8 @@ function buildVillage(){
       pbox(M, h.x+rx2, y0+ht-0.06, h.z+rz2, w/2*0.85+0.1, 0.045, 0.56, h.yaw, tint(h.wc,0.8), 4);
       for(const sd of [-1,1]){
         const [qx,qz]=rotY(sd*w/2*0.75, -(d/2+0.86), ca, sa);
-        pcyl(M, [h.x+qx, h.y-0.1, h.z+qz], [h.x+qx, y0+ht-0.06, h.z+qz], 0.055, 0.05, 4, LC('timber'), 5, false, true);
+        const qy = State.housebase ? Math.min(h.y-0.1, sampleHeight(h.x+qx, h.z+qz)-0.1) : h.y-0.1;   // HOUSEBASE — a post reaches its own ground
+        pcyl(M, [h.x+qx, qy, h.z+qz], [h.x+qx, y0+ht-0.06, h.z+qz], 0.055, 0.05, 4, LC('timber'), 5, false, true);
       }
     }
   }
@@ -11341,7 +11355,14 @@ function buildVillage(){
       const [qx,qz]=rotY(0,2.85,ica,isa);
       pbox(M, ix+qx, iy+2.12, iz+qz, 3.35, 0.05, 0.8, iyaw, tint(LC('thatch'),0.85), 4);
       for(const sd of [-1,1]){ const [ox,oz]=rotY(sd*2.9,3.2,ica,isa);
-        pcyl(M, [ix+ox, iy-0.1, iz+oz], [ix+ox, iy+2.1, iz+oz], 0.055, 0.05, 4, LC('timber'), 5, false, true); } }
+        const qy = State.barnfound ? Math.min(iy-0.1, sampleHeight(ix+ox, iz+oz)-0.1) : iy-0.1;   // BARNFOUND — a porch post reaches its own ground
+        pcyl(M, [ix+ox, qy, iz+oz], [ix+ox, iy+2.1, iz+oz], 0.055, 0.05, 4, LC('timber'), 5, false, true); } }
+    if(State.barnfound){   // BARNFOUND — stone plinth under the walls, top just under the floor (iy+0.02), down to the lowest of 9 footprint samples − 0.3 (it floated ~0.3 m downhill)
+      let gLo=Infinity;
+      for(const a of [-1,0,1]) for(const b of [-1,0,1]){ const [ox,oz]=rotY(a*3.35, b*2.35, ica, isa); gLo=Math.min(gLo, sampleHeight(ix+ox, iz+oz)); }
+      const fb=gLo-0.3, ft=iy+0.02;
+      if(ft-fb > 0.1) pbox(M, ix, (ft+fb)/2, iz, 3.35, (ft-fb)/2, 2.35, iyaw, tint(LC('sB'),0.85), 0);
+    }
     { // the noren strip over the doorway
       const [nx,nz]=rotY(-0.8,2.25,ica,isa);
       pbox(M, ix+nx, iy+1.72, iz+nz, 0.45, 0.35, 0.015, iyaw, tint(LC('roofSlate'),0.9), 5);
@@ -11380,6 +11401,15 @@ function buildVillage(){
       if(solid) pushSolid(bx+wx, bz+wz, hx, hz, byaw, by+4.3); };   // top = barn ridge (§W2)
     bwall(0,-2.5, 3.5,0.07, true);                     // back
     bwall(-3.5,0, 0.07,2.5, true); bwall(3.5,0, 0.07,2.5, true);   // sides
+    if(State.barnfound){   // BARNFOUND — stone sills under the three walls (no floor: the open front shows the ground and its grass), down to the lowest of 9 footprint samples − 0.3
+      let gLo=Infinity;
+      for(const a of [-1,0,1]) for(const b of [-1,0,1]){ const [ox,oz]=rotY(a*3.57, b*2.57, bca, bsa); gLo=Math.min(gLo, sampleHeight(bx+ox, bz+oz)); }
+      const fb=gLo-0.3, ft=by+0.05, sC=tint(LC('sB'),0.85);
+      if(ft-fb > 0.1) for(const [lx,lz,hx,hz] of [[0,-2.5,3.65,0.15],[-3.5,0,0.15,2.6],[3.5,0,0.15,2.6]]){
+        const [wx,wz]=rotY(lx,lz,bca,bsa);
+        pbox(M, bx+wx, (ft+fb)/2, bz+wz, hx, (ft-fb)/2, hz, byaw, sC, 0);
+      }
+    }
     { const [dx,dz]=rotY(0,2.1,bca,bsa);               // the dark opening, recessed
       pbox(M, bx+dx, by+1.1, bz+dz, 3.2, 1.1, 0.03, byaw, tint(LC('timber'),0.3), 3); }
     proof(M, bx, by+2.6, bz, 3.9, 2.9, 1.7, byaw, LC('thatch'), 4);
@@ -16673,6 +16703,8 @@ const State = {
     crown2:    qsBool('crown2', true),     // §31.WALL S2 — near-lens dither-fade of tree geometry within 0.6 m of the eye: brushing a crown reads as leaves, never a flat hollow shell.  Defect fix, default ON; ?crown2=0 escape (uCrown2=0 ⇒ the FS discard is dead code, byte-identical frame)
     kept:      qsBool('kept', true),       // §31.STEADY W3 — THE KEPT VILLAGE: grass kept short in the yards (0.42) and trodden at the walls (×0.55) of every village SOLID + the lane ribbon, so no lit pane glows through chest-high blades ("a few windows still jittering" / "Nearby houses" = the veil, measured).  Defect fix, default ON; ?kept=0 ⇒ no map, grass shader byte-identical
     millfound: qsBool('millfound', true),  // MILLFOUND — the watermill gets a stone foundation down to the lowest ground under its footprint (it hovered 1.4 m over the bank beside the viaduct pier).  No placement/rng change.  ?millfound=0 = old
+    housebase: qsBool('housebase', true),  // HOUSEBASE (2026-10-27) — village houses on slopes sit on a level stone base: lifted only where the uphill ground would swallow the plinth (doors sunk in the grass), plinth reaches the ground on the downhill side.  No rng draw, x,z unchanged.  ?housebase=0 = old
+    barnfound: qsBool('barnfound', true),  // BARNFOUND (2026-10-27) — the barn (floated ~1.1 m at its downhill corner) gets stone sills under its three walls, the inn a stone plinth, both down to the lowest of 9 footprint samples − 0.3.  ?barnfound=0 = old
     sill:      qsBool('sill', true),       // §31.STEADY W3 — village windows' low row lifted off the ground (sill ≥ 0.55 m; a hut keeps one row).  LAW 12 continuity + the last of the veil.  Default ON; ?sill=0 restores the 0.42·ht row byte-identically (same rng draw)
     treekill:  qsBool('treekill', true),   // §31.STEADY S3v2 — the tree oscillator kill band moves inward to 60→110 m (was 120→150, §31.WALL S3): the only animated mover left at mid range in flight ("still tremble" / "flying + mid-distance"; shadows/clouds/wind bisected null).  Default ON; ?treekill=0 ⇒ uTreeKill (120,150) = the S3 arithmetic exactly
     fastfade:  qsBool('fastfade', true),   // §FASTFADE (2026-10-20) — tree clump sway + leaf flutter (the 1.7-3.5x faster terms) fade out 35→50 m; the slow trunk sway keeps the 60→110 m mfade
