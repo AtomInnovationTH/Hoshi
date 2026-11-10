@@ -309,7 +309,9 @@
   <h3>Controls</h3>
   <div class="row"><label>Mouse feel</label><input id="pSens" type="range" min="20" max="200" value="100"><span class="val" id="pSensV">1.00</span></div>
   <div class="row"><label>Invert Y</label><input id="pInvY" type="checkbox" class="chk"></div>
-  <div class="row" id="rTilt" style="display:none"><label>Tilt steering</label><input id="pTilt" type="checkbox" class="chk"></div>
+  <div class="row" id="rTiltBank" style="display:none"><label>Tilt to bank</label><input id="pTiltBank" type="checkbox" class="chk"></div>   <!-- N18 — roll only, while the left thumb is down -->
+  <div class="row" id="rTilt" style="display:none"><label>Full tilt steering</label><input id="pTilt" type="checkbox" class="chk"></div>
+  <div class="row" id="rPitch" style="display:none"><label>Thumb up</label><div class="seg"><button type="button" id="pPitchDive">dives</button><button type="button" id="pPitchClimb">climbs</button></div></div>   <!-- N18 D10 — which way the left thumb pitches in flight -->
   <div class="row" id="rRelevel" style="display:none"><label>Re-level tilt</label><div class="seg"><button type="button" id="pRelevel">re-level</button></div></div>
   <h3>Sound</h3>
   <div class="row"><label>Audio</label><input id="aVol" type="range" min="0" max="100" value="70"><span class="val" id="aVolV">70</span></div>
@@ -4215,10 +4217,9 @@ window.__HOSHI_MOD = true;   // the module reached the body: real boot can proce
    these once in a small "Hoshi was updated" card; first-time players never do.
    Test it: ?whatsnew=1 forces the card · ?whatsnew=0 turns the card and the
    new-version prompt off.  Logic: §WN block just above `go` at the file's end. */
-const RELEASE = { id: '2026-11-10', notes: [
-  'On iPad you now steer with your left thumb, like most games. Tilt steering is still there in Settings',
-  'The bell tower has a bronze bell that strong gusts ring, and the bamboo poles are real: brush one and it sways, fly straight into one and you drop',
-  'Smoother flying: the grass no longer flickers when you fly fast, and gliding along the viaduct no longer snaps you onto its deck',
+const RELEASE = { id: '2026-11-11', notes: [
+  'On iPad, tilt can help you turn: Settings → Tilt to bank, then keep your left thumb down and roll the iPad',
+  'On iPad, your next flight asks which way your left thumb lifts the nose, and remembers it (Settings → Thumb up changes it)',
 ] };
 
 window.addEventListener('error', e=>{
@@ -17062,6 +17063,7 @@ class Walker {
   _takeoff(){                 // A1: enter flight with a gentle, eased rise
     if(this._inShelter){ if(typeof toast === 'function') toast('not under a roof'); return; }   // §W6-F5
     this.fly=true; this._airborne=false; this.flyY=1.0; this._beatT=0; this._spaceHold=0;
+    PitchAsk.begin();   // N18 D9 — first flight on glass: ask which way up goes (its toast lands after the take-off one)
     { const _wgT = window.__WINGS;   // §M4 — the launch beat spends journey stamina too (the beats-owned arithmetic stays honest); spent wings rise on legs alone
       if(_wgT && !_wgT.beat()) this._beatT = -1; }
     this._flareT=0;          // a fresh takeoff cancels any leftover landing flare
@@ -17273,6 +17275,7 @@ class Walker {
     const k=this.keys;
     let fw=0, sd=0;
     this._lookDrain(dt);                             // §LOOKSM
+    if(State.pitchAsk) PitchAsk.tick(this, dt);     // N18 D9 — the first-flight pitch question
     if(k['KeyA']||k['ArrowLeft']) sd-=1;
     if(k['KeyD']||k['ArrowRight'])sd+=1;
     /*  §M1 — the analog stick (tilt), merged MODE-AWARE into the same locals the
@@ -17284,8 +17287,8 @@ class Walker {
             rate that ignores State.sens (mouse feel must not rescale a tilt).
         Input.stick is exactly {0,0} whenever no tilt source feeds it (desktop,
         every bench harness), so each merge below is a dead branch there.      */
-    if(Input.stick.x && !this.cinematic){
-      if(this.fly) sd = clamp(sd + Input.stick.x, -1, 1);
+    if((Input.stick.x || (this.fly && Input.tiltBank)) && !this.cinematic){   // N18 — tiltBank joins only in flight (on foot it is never read)
+      if(this.fly) sd = clamp(sd + Input.stick.x + Input.tiltBank, -1, 1);
       else this.look(Input.stick.x*(Input.tune.turn*0.0174533)*dt/(0.0021*State.sens), 0, true);   // ≤ tune.turn °/s at full deflection (direct: §LOOKSM)
     }
     /*  §29.1 T0.3 (Batch V7) — the crag proximity scalars: ONE hypot per frame
@@ -19972,6 +19975,8 @@ const State = {
   fpscap:  qsNum('fpscap', 60),
   sens:    qsNum('sens', 1),     // panel "Mouse feel": look sensitivity multiplier
   invertY: qsBool('invertY', false),
+  pitchAsk: false,   // N18 — true while the first-flight pitch question is open (witness; PitchAsk below)
+  tiltBank: qsBool('tiltbank', false),   // N18 — "Tilt to bank": tilt rolls the glider, left/right only, while the left thumb is down (thumbs stay the stick).  Panel / ?tiltbank=1.  Full tilt (State.tilt) wins if both.
   tilt:    qsBool('tilt', false),   // N17 — tilt (IMU) steering on touch glass.  Default OFF: the left thumb steers.  Panel "Tilt steering" / ?tilt=1.  (NOT `stick`: State.stick is the swoop flag below.)
   dprCap:  qsNum('dpr', HAS_TOUCH ? 2 : 0),       // 0 = the panel's native ratio; §M1: touch devices default-cap at 2 (13" iPad M5 native IS 2 → ≈18.4M samples at q=2, inside MAX_SAMPLES; guards any 3× panel)
   ipad:    qsBool('ipad', HAS_TOUCH),   // §B5 (B0b, ch 2.7) — the approved iPad M5 preset: HAS_TOUCH-gated msaa 2 · px 0.80 · shadow 2048 · grass gb ×0.7 · fpscap 60 (applied at the FID block below).  ?ipad=0 = the total escape (desktop config on glass); ?ipad=1 forces it on for a desktop A/B.
@@ -20151,6 +20156,7 @@ State.growfresh = State.grow && qsBool('growfresh', true);
 State.adv = State.grow && (QS.has('adv') ? QS.get('adv') !== '0' : (()=>{ try{ return localStorage.getItem('hoshi_adv') === '1'; }catch(e){ return false; } })());
 State.ridgebirds = State.grow && qsBool('ridgebirds', true);   // N8 L2 / D7 — 2–3 soaring birds along the ridge beats (?ridgebirds=0 off; grow only)
 State.mumcue = State.grow && qsBool('mumcue', true);           // N8 L2 / D3 — the mother's careful pass over a chick lost in the grass (?mumcue=0 off; grow only)
+const LS_RAW = (()=>{ try{ return { set: Storage.prototype.setItem, rm: Storage.prototype.removeItem }; }catch(e){ return null; } })();   // N18 D8 — the real setItem/removeItem, kept before growfresh blocks hoshi_* writes: the CHOSEN pitch thumb is the one settings key that must survive it (like hoshi_adv), or the default URL would ask every session
 if(State.growfresh){   // D19 — a checkpoint run on the owner's iPad must not use up his REAL first-flight toasts, hints or settings: no `hoshi_*` key is written or removed this session (reads stay normal)
   try{
     const SP = Storage.prototype, _set = SP.setItem, _rm = SP.removeItem;
@@ -20228,15 +20234,34 @@ if(PERSIST){
     if(!QS.has('sens') && typeof _savedSet.sens === 'number') State.sens = clamp(_savedSet.sens, 0.2, 2);
     if(!QS.has('invertY')) State.invertY = !!_savedSet.invertY;
     if(!QS.has('tilt')) State.tilt = !!_savedSet.tilt;   // N17
+    if(!QS.has('tiltbank')) State.tiltBank = !!_savedSet.tiltBank;   // N18
   }
 }
+let pitchSaved = (PERSIST && _savedSet && (_savedSet.pitch === 1 || _savedSet.pitch === -1)) ? _savedSet.pitch : 0;   // N18 D8 — the CHOSEN pitch thumb (+1 up dives, −1 up climbs); 0 = not chosen yet
+let tiltBankKeepSaved = false;   // N18 — a session-only motion refusal at game start: no bank for now, the SAVED tiltBank stays on
 let tiltKeepSaved = false;   // N17 — a session-only motion refusal at game start: thumbs for now, but the SAVED tilt setting stays on (any later save keeps it)
+/*  N18 — exclusive: an explicit ?tiltbank=1 beats a SAVED full tilt for this session (the saved tilt stays on: tiltKeepSaved, like a session-only refusal); otherwise full tilt wins (State.tiltBank false for the session). */
+if(State.tiltBank && State.tilt){ if(QS.has('tiltbank') && !QS.has('tilt')){ State.tilt = false; tiltKeepSaved = !!(PERSIST && _savedSet && _savedSet.tilt); } else State.tiltBank = false; }
 const saveSettings = ()=>{
   if(!PERSIST) return;
   try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify({
     q: State.q, sens: State.sens, invertY: State.invertY, tilt: tiltKeepSaved ? true : State.tilt,
+    tiltBank: tiltBankKeepSaved ? true : State.tiltBank,   // N18
+    ...(pitchSaved ? { pitch: pitchSaved } : {}),   // N18 D8 — only the chosen one, never a ?thumbpitch pin
     vol: audio ? audio.vol : 0.7, music: audio ? audio.music : true,
     musicV2: State.musicV2 })); }catch(e){}
+};
+/*  N18 D12 — the tilt / tilt-to-bank CHOICE is remembered between visits even under growfresh (which blocks every other hoshi_* write): a Settings tick / refusal / reset
+    also writes just those two fields, field-level, through the un-blocked setItem (like PitchAsk.store).  clear = #pReset (fields removed).  Session-only refusals keep the saved value. */
+const saveTiltChoice = (clear)=>{
+  if(!clear) saveSettings();
+  if(!PERSIST || !State.growfresh || !LS_RAW) return;
+  try{
+    const o = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null') || {};
+    if(clear){ delete o.tilt; delete o.tiltBank; }
+    else { o.tilt = tiltKeepSaved ? true : !!State.tilt; o.tiltBank = tiltBankKeepSaved ? true : !!State.tiltBank; }
+    LS_RAW.set.call(localStorage, SETTINGS_KEY, JSON.stringify(o));
+  }catch(e){}
 };
 G.uBiasFix.value = State.bias?1:0;
 if(State.grow){ G.uGrowLens = { value:1.0 }; G.uGrowMow = { value:Array.from({ length:14 }, ()=> new THREE.Vector4(0, 0, 0, 0)) }; G.uGrowMowBB = { value:new THREE.Vector4(0, 0, -1, -1) }; G.uGrowPath = { value:Array.from({ length:20 }, ()=> new THREE.Vector4(0, 0, 0, 0)) }; G.uGrowPathBB = { value:new THREE.Vector4(0, 0, -1, -1) }; }   // THE NEST — read by GRASS_VS (declared only under grow); __GROW.lens toggles it
@@ -24584,13 +24609,92 @@ let toastT=null;
 let hudMode=1;   // Tab cycles: 1 keys only (default) -> 0 metrics on -> 2 hidden -> 1
 function toast(msg){
   let g = false; try{ g = !!State.grow; }catch(e){}
+  if(State.pitchAsk && typeof msg === 'string' && PitchAsk.hold(msg, g)) return;   // N18 D9 — a lesson / note never covers the open pitch question; it waits (never spent, never lost)
   if(g){ msg = paceGate(msg); if(msg === null) return; }   // N6 L4 — grow only: the words + their pacing (PACE below); ?grow=0 never enters
   toastShow(msg);
 }
 function toastShow(msg){
   const el=$('#toast'); el.textContent=msg; el.classList.add('on');
-  clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('on'), 1800);
+  clearTimeout(toastT); toastT=setTimeout(()=>{ if(State.pitchAsk) toastSticky(PITCH_ASK_TX); else el.classList.remove('on'); }, 1800);   // N18 — any other toast that replaced the open pitch question gives it back
 }
+function toastSticky(msg){   // N18 D9 — stays up until something else replaces it or it is cleared; bypasses paceGate
+  toastShow(msg); clearTimeout(toastT); toastT = null;
+}
+/*  N18 D8–D11 — the first-flight pitch choice.  Asked at a take-off on touch glass with the thumb stick (!State.tilt) when no pitch is saved
+    (PERSIST loads only, no ?thumbpitch pin) — or forced by ?pitchask=1 on any load.  While open, flight stick.y / tiltDegY are held at 0
+    (the thumb stick writes 0 — see stkApply — bank still works) and the left thumb's raw up/down is timed per frame: |y| >= 0.5 held
+    0.25 s answers (thumb up → pitch −1, thumb down → +1), saves, applies from that frame.  Landing unanswered closes it; asked again next take-off. */
+const PITCH_ASK_TX = 'lift-off — right thumb flaps. to lift the nose, slide your left thumb the way that means up to you';   // carries the take-off line the sticky toast wipes
+const PitchAsk = {
+  t: 0, vis: 0, armed: false, wasAct: false, q: [], fl: false, answered: false,   // vis: seconds the ask toast has been on screen; armed: the left thumb has been neutral / freshly down since the ask began (a thumb still pushed from walking answers nothing); q: lines held while asking (grow=0; grow uses the PACE queue); answered: a forced (?pitchask=1) question is asked until this session has an answer
+  forced(){ return qsBool('pitchask', false) && !PitchAsk.answered; },
+  want(){ return Input.hasTouch && !State.tilt && (PitchAsk.forced() || (PERSIST && !pitchSaved && !QS.has('thumbpitch'))); },
+  begin(){   // from Walker._takeoff, once the flight really starts
+    if(State.pitchAsk || !PitchAsk.want()) return;
+    State.pitchAsk = true; PitchAsk.t = 0; PitchAsk.vis = 0; PitchAsk.armed = false; PitchAsk.wasAct = !!Input.thumb.active;
+    setTimeout(()=>{ if(State.pitchAsk) toastSticky(PITCH_ASK_TX); }, 0);   // after the take-off toast, so it cannot replace this one
+  },
+  end(){
+    if(!State.pitchAsk) return;
+    State.pitchAsk = false; PitchAsk.t = 0;
+    const el = document.getElementById('toast');
+    if(el && el.textContent === PITCH_ASK_TX){ el.classList.remove('on'); }
+    PitchAsk.flush();
+  },
+  hold(msg, g){   // toast(): true = the line waits (story / food / note / ✦ — their beat is already marked seen, so they must not be lost); ridge / rep lessons (grow) are just dropped, unspent
+    const pe = PACE_TX[msg], kind = pe ? pe[1] : (msg.charCodeAt(0) === 0x2726 ? 'note' : null);
+    if(!kind) return false;
+    if(kind === 'story' || kind === 'food' || kind === 'note'){
+      if(g) paceDefer(paceS(), pe && pe[0] ? pe[0] : msg, PACE_PRI[kind]);   // the PACE queue shows it on foot after landing
+      else if(PitchAsk.q.indexOf(msg) < 0) PitchAsk.q.push(msg);
+      return true;
+    }
+    return g && /^(ridge|rep)/.test(kind);
+  },
+  flush(){   // shows the lines held while asking (grow=0 queue), one every 2.2 s, starting after the "got it" toast
+    if(PitchAsk.fl || !PitchAsk.q.length) return;
+    PitchAsk.fl = true;
+    const step = ()=>{ if(State.pitchAsk || !PitchAsk.q.length){ PitchAsk.fl = false; return; } toastShow(PitchAsk.q.shift()); setTimeout(step, 2200); };
+    setTimeout(step, 2200);
+  },
+  save(v){   // the CHOSEN pitch; a measurement URL (no PERSIST) still keeps it when ?pitchask=1 asked
+    pitchSaved = v;
+    PitchAsk.store(v);
+  },
+  store(v){   // read-modify-write of the one pitch field, through the un-blocked setItem (growfresh, or a measurement URL with ?pitchask=1); v 0 = not chosen
+    try{
+      const o = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null') || {};
+      if(v) o.pitch = v; else delete o.pitch;
+      if(!v && !Object.keys(o).length){ if(LS_RAW) LS_RAW.rm.call(localStorage, SETTINGS_KEY); else localStorage.removeItem(SETTINGS_KEY); return; }
+      if(LS_RAW) LS_RAW.set.call(localStorage, SETTINGS_KEY, JSON.stringify(o)); else localStorage.setItem(SETTINGS_KEY, JSON.stringify(o));
+    }catch(e){}
+  },
+  apply(v){ Input.tune.thumbPitch = v; if(Input.thumbApply) Input.thumbApply(); },
+  choose(v){ PitchAsk.answered = true; PitchAsk.save(v); PitchAsk.apply(v); PitchAsk.syncRow(); },
+  syncRow(){
+    const d = document.getElementById('pPitchDive'), c = document.getElementById('pPitchClimb'); if(!d || !c) return;
+    d.classList.toggle('on', Input.tune.thumbPitch > 0); c.classList.toggle('on', Input.tune.thumbPitch < 0);
+  },
+  tick(w, dt){   // every frame, from Walker.update
+    if(!State.pitchAsk) return;
+    if(!w.fly){ PitchAsk.end(); return; }
+    const act = !!Input.thumb.active, y = act ? Input.thumb.rawY : 0;
+    const el = document.getElementById('toast');
+    if(el && el.classList.contains('on') && el.textContent === PITCH_ASK_TX) PitchAsk.vis += dt;
+    if(!act || Math.abs(y) < 0.5 || (act && !PitchAsk.wasAct)) PitchAsk.armed = true;   // neutral, released, or freshly touched down
+    PitchAsk.wasAct = act;
+    if(Math.abs(y) >= 0.5 && PitchAsk.armed && PitchAsk.vis >= 0.5){
+      PitchAsk.t += dt;
+      if(PitchAsk.t >= 0.25){
+        const v = y > 0 ? -1 : 1;   // thumb up lifts the nose → −1
+        State.pitchAsk = false; PitchAsk.t = 0;
+        PitchAsk.choose(v);
+        toastShow(v < 0 ? 'got it: thumb up lifts the nose — change it in Settings' : 'got it: thumb down lifts the nose — change it in Settings');
+        PitchAsk.flush();
+      }
+    } else PitchAsk.t = 0;
+  },
+};
 /*── N6 L4 — PACE (grow only; ?grow=0 never enters it): the game's words and their pacing, in one place (owner 11-05 13:55Z:
     "concise, eli-10 … Toast/popups/distractions break immersion when flying … should taper off").  Every toast passes
     paceGate(msg): a known line is REWRITTEN here (the call sites keep today's text, so ?grow=0 shows exactly today's words and
@@ -24909,11 +25013,12 @@ function hintSeen(id){
 const Input = {
   stick: { x: 0, y: 0 },   // −1..1; x + = bank/turn right, y + = tipped forward
   tiltDegY: 0,             // smoothed fore/aft tilt, degrees from neutral
+  tiltBank: 0,             // N18 — "Tilt to bank": −1..1 roll (+ = bank right), NON-ZERO only while the left thumb is down; flight only (Walker merges it with stick.x)
   feedN: 0,                // §M3 — count of tilt samples ever fed (first-steps liveness valve; harness witness)
   dragPx: 0,               // §M3 — cumulative look-drag finger travel in px (first-steps look witness; harness probes it)
   /*  N17 — harness witness of the floating left-thumb stick (always present; active:false = no stick).
       ox/oy = the stick origin in css px; x/y = the values written to `stick` (after dead zone + expo).    */
-  thumb: { active:false, ox:0, oy:0, x:0, y:0 },
+  thumb: { active:false, ox:0, oy:0, x:0, y:0, rawY:0 },
   hasTouch: HAS_TOUCH,
   /*  §M1b — the tilt response knobs, overridable by the shell that hosts the
       game (window.__TILT_TUNE, read once at boot: the PWA build ships a
@@ -24927,7 +25032,7 @@ const Input = {
       stick, same as tilt and ArrowUp), −1 push up → nose UP (?thumbpitch=-1).  Flight pitch only: on
       foot up is always "walk forward".                                                                   */
   tune: Object.assign({ dead: 4, full: 20, expo: 1.5, turn: 80, deep: 25, lp: 10, look: 1.6,
-      thumbR: 64, thumbDead: 0.10, thumbExpo: 1.4, thumbPitch: (QS.has('thumbpitch') && +QS.get('thumbpitch') < 0) ? -1 : 1 },
+      thumbR: 64, thumbDead: 0.10, thumbExpo: 1.4, bankDead: 3, bankFull: 32, bankExpo: 1.5, thumbPitch: QS.has('thumbpitch') ? (+QS.get('thumbpitch') < 0 ? -1 : 1) : (pitchSaved || 1) }   /* N18 D8 — ?thumbpitch pins > saved choice > +1 */,
     window.__TILT_TUNE || {}),
 };
 window.__INPUT = Input;    // harness witness (tilt_map.js probes the mapping)
@@ -24944,17 +25049,36 @@ const TiltCtl = (()=>{
     roll: Math.asin(clamp(lgy*sgn, -1, 1)),                 // + = left long-edge down
     rec:  Math.atan2(-lgz, Math.max(-lgx*sgn, 1e-4)),       // 0 = vertical, π/2 = flat
   });
-  function cal(){
-    if(!has){ calibrated = false; return; }    // pre-feed call: first sample self-calibrates
+  const setSgn = ()=>{   // landscape sign from gravity (N18: shared by cal() and the bank clutch)
     if(lgx <= -0.15) sgn = 1;
     else if(lgx >= 0.15) sgn = -1;
     else if(window.__hoshiOrient === 1 || window.__hoshiOrient === -1) sgn = window.__hoshiOrient;
+  };
+  function cal(){
+    if(!has){ calibrated = false; return; }    // pre-feed call: first sample self-calibrates
+    setSgn();
     const a = angles(); roll0 = a.roll; rec0 = a.rec;
     calibrated = true;
+    if(!State.tilt) return;   // N18 — bank mode: cal() only sets sgn + the roll reference; the stick belongs to the thumb (zeroing it here would wipe a held thumb)
     Input.stick.x = 0; Input.stick.y = 0; Input.tiltDegY = 0;
   }
+  /*  N18 — "Tilt to bank": roll only, gentler than full tilt (bankDead/bankFull/bankExpo), clutched by the left thumb.
+      The neutral roll is captured at that thumb's touch-down (clutch(), called where the stick takes ownership);
+      thumb up / reset / stale feed → Input.tiltBank = 0 the same frame (bankOff()).  Never writes Input.stick / tiltDegY. */
+  let bankPend = false;   // N18 — thumb is down but no fresh sample yet: the first sample becomes the neutral
+  const bankShape = deg=>{
+    const m = Math.abs(deg), d = T.bankDead; if(m <= d) return 0;   // HARD zero inside the dead zone
+    return Math.sign(deg)*Math.pow(Math.min(1, (m - d)/(T.bankFull - d)), T.bankExpo);
+  };
+  function clutch(){
+    if(!State.tiltBank) return;
+    Input.tiltBank = 0;
+    if(has && performance.now() - tPrev <= 500){ setSgn(); roll0 = angles().roll; bankPend = false; }
+    else { has = false; bankPend = true; }   // stale / none yet: the next sample lands unsmoothed and is the neutral
+  }
+  function bankOff(){ Input.tiltBank = 0; bankPend = false; }
   function feed(gx, gy, gz){
-    if(!State.tilt) return;   // N17 — tilt steering is a Settings option: off = the left thumb is the only writer of Input.stick
+    if(!State.tilt && !State.tiltBank) return;   // N17 N17 — tilt steering is a Settings option: off = the left thumb is the only writer of Input.stick
     const L = Math.hypot(gx, gy, gz); if(!(L > 0.5)) return;
     Input.feedN++;   // §M3 — tilt liveness (the first-steps valve reads it; 0 forever = no tilt source)
     const t = performance.now();
@@ -24969,7 +25093,16 @@ const TiltCtl = (()=>{
          desktop/bench session never even runs the interval.  (N17: only
          while tilt steers — with tilt off the stick belongs to the thumb.) */
       if(!wd){ wd = true; setInterval(()=>{ if(State.tilt && performance.now() - tPrev > 500){
-        Input.stick.x = 0; Input.stick.y = 0; Input.tiltDegY = 0; } }, 250); }
+        Input.stick.x = 0; Input.stick.y = 0; Input.tiltDegY = 0; }
+        if(State.tiltBank && Input.tiltBank && performance.now() - tPrev > 500) Input.tiltBank = 0; }, 250); }   // N18 — bank: a stale feed also zeroes tiltBank
+    }
+    if(State.tiltBank){   // N18 — bank mode: roll only, only while the left thumb is down
+      if(!calibrated) cal();
+      if(!Input.thumb.active){ bankOff(); return; }
+      const ab = angles();
+      if(bankPend){ setSgn(); roll0 = angles().roll; bankPend = false; }
+      Input.tiltBank = bankShape(-(ab.roll - roll0)/RAD);   // right edge down = + = bank right (same sign as full tilt)
+      return;
     }
     if(!calibrated) cal();
     const a = angles();
@@ -24987,12 +25120,35 @@ const TiltCtl = (()=>{
     on = !!on;
     State.tilt = on; tiltKeepSaved = false;
     Input.stick.x = 0; Input.stick.y = 0; Input.tiltDegY = 0;
+    if(on && State.tiltBank){ State.tiltBank = false; tiltBankKeepSaved = false; bankOff(); const bb = document.getElementById('pTiltBank'); if(bb) bb.checked = false; }   // N18 — mutually exclusive
     if(Input.thumbReset) Input.thumbReset();
     if(on){ has = false; calibrated = false; cal(); }
     const box = document.getElementById('pTilt'); if(box) box.checked = on;
     const rl = document.getElementById('rRelevel'); if(rl) rl.style.display = (on && Input.hasTouch) ? '' : 'none';
     if(Input.ctlStrings) Input.ctlStrings();
     if(!on && window.__OB && window.__OB.tiltOff) window.__OB.tiltOff();   // N17 — a lesson in the tilt deck follows to the thumb deck (it can never lock)
+  }
+  /*  N18 — setTiltBank(on): the bank switch.  On = full tilt off (box + saved follow via the caller's saveSettings), neutral forgotten.
+      Off = tiltBank 0 at once.  A held thumb is NOT dropped (the stick stays the thumb's either way).      */
+  function setTiltBank(on){
+    on = !!on;
+    if(on && State.tilt) setTilt(false);
+    State.tiltBank = on; tiltBankKeepSaved = false;
+    bankOff();
+    if(on){ has = false; calibrated = false; }
+    const box = document.getElementById('pTiltBank'); if(box) box.checked = on;
+    if(on && Input.thumb.active) bankPend = true;   // ticked under a held thumb: the first sample is the neutral
+  }
+  /*  N18 — the bank refusal.  sessionOnly (game start): no bank for THIS session, the saved setting stays on.  Else (Settings tick): box off, saved off. */
+  function bankRefused(sessionOnly){
+    setTiltBank(false);
+    if(sessionOnly){
+      tiltBankKeepSaved = true;
+      toast('motion access was refused — thumb steering for now (tilt to bank stays on in settings)');
+      return;
+    }
+    toast('motion access was refused — tilt to bank stays off');
+    saveTiltChoice();
   }
   /*  the player-visible refusal: back to thumbs, box unchecked, one honest line, saved so it never re-asks. */
   function refused(sessionOnly){
@@ -25003,7 +25159,7 @@ const TiltCtl = (()=>{
       return;
     }
     toast('motion access was refused — tilt stays off');
-    saveSettings();
+    saveTiltChoice();
   }
   /*  browser(cb): cb('granted'|'denied'|'error') on EVERY path (N17).  A refusal/error resets browserOn so a
       later toggle can ask again (the OS decides whether it will; iPadOS re-asks per launch, Settings can't).  */
@@ -25033,10 +25189,10 @@ const TiltCtl = (()=>{
       else { attach(); fin('granted'); }
     }catch(err){ fin('error'); }
   }
-  return { feed, cal, browser, setTilt, refused, _ext: v=>{ ext = v; } };
+  return { feed, cal, clutch, bankOff, browser, setTilt, setTiltBank, refused, bankRefused, _ext: v=>{ ext = v; } };
 })();
 window.__hoshiTilt = (gx, gy, gz)=>{ TiltCtl._ext(true); TiltCtl.feed(gx, gy, gz); };
-window.__hoshiTiltCal = ()=>{ if(State.tilt) TiltCtl.cal(); };   // N17 — tilt OFF: nothing (cal() would zero the stick under a held thumb)   // wrapper + harness recalibrate hook
+window.__hoshiTiltCal = ()=>{ if(State.tilt) TiltCtl.cal(); };   /* N18 — bank mode: nothing (the neutral is the thumb's touch-down) */   // N17 — tilt OFF: nothing (cal() would zero the stick under a held thumb)   // wrapper + harness recalibrate hook
 
 /*──────────────── §M3 — FIRST STEPS (the walk-before-fly onboarding) ───────
     Owner-commissioned (ipad handoff §10): a first-run, touch-only lesson.
@@ -25154,7 +25310,10 @@ const OB = (()=>{
           held pose the moment tilt flows: right here when it already does
           (replay / pre-attached), else from tick when the grant lands.      */
       gripTap = true;
-      if(!State.tilt) return;   // N17 — thumb mode: the tap alone passes the card (tick), no popup, no tilt flow
+      if(!State.tilt){   // N17 — thumb mode: the tap alone passes the card (tick), no popup, no tilt flow
+        if(State.tiltBank) TiltCtl.browser(s=>{ if(s !== 'granted' && State.tiltBank) TiltCtl.bankRefused(); });   // N18 — bank mode still wants the motion popup (the card passes on the tap alone)
+        return;
+      }
       TiltCtl.browser(s=>{ if(s !== 'granted' && State.tilt) TiltCtl.refused(); });
       if(Input.feedN > 0){ TiltCtl.cal(); toast('level set'); pass(); }
     }, { passive:true });
@@ -29021,10 +29180,11 @@ function bindInput(){
       const ux = stkShape(stkRx), uy = stkShape(stkRy);
       Input.stick.x = ux;
       if(fly){   // flight: pitch RATE (thumbPitch picks which way up goes) + full push = tuck / spread
-        const y = uy ? uy*TU.thumbPitch : 0;
+        TH.rawY = uy;   // N18 D9 — the unrotated thumb up/down, for the first-flight question
+        const y = (uy && !State.pitchAsk) ? uy*TU.thumbPitch : 0;   // N18 D9 — while the question is open nothing pitches
         Input.stick.y = y;
         Input.tiltDegY = Math.abs(y) > 0.92 ? Math.sign(y)*(TU.deep + 1) : 0;
-      } else { Input.stick.y = uy; Input.tiltDegY = 0; }   // on foot: up = walk forward, always
+      } else { Input.stick.y = uy; Input.tiltDegY = 0; TH.rawY = uy; }   // on foot: up = walk forward, always
       TH.x = ux; TH.y = Input.stick.y;
     };
     const stkDraw = (px, py)=>{
@@ -29040,8 +29200,8 @@ function bindInput(){
     };
     const stkHide = ()=>{ if(ringEl){ ringEl.classList.remove('on'); knobEl.classList.remove('on'); } };
     const stkZero = ()=>{
-      Input.stick.x = 0; Input.stick.y = 0; Input.tiltDegY = 0;
-      TH.active = false; TH.x = 0; TH.y = 0;
+      Input.stick.x = 0; Input.stick.y = 0; Input.tiltDegY = 0; TiltCtl.bankOff();   // N18 — thumb up = the bank clutch opens the same frame
+      TH.active = false; TH.x = 0; TH.y = 0; TH.rawY = 0;
     };
     const stkLoop = ()=>{   // alive only while a stick is down: re-reads the mode so a take-off / landing under a held thumb flips the pitch meaning
       stkRaf = 0; if(stkId === null) return;
@@ -29065,6 +29225,7 @@ function bindInput(){
       stkZero(); stkHide();
     };
     Input.thumbReset = thumbReset;
+    Input.thumbApply = ()=>{ if(stkId !== null && stkMoved) stkApply(); };   // N18 D9 — re-derive the stick the frame the pitch choice changes
     const thumbKill = ()=>{ if(!State.tilt) thumbReset(); };
     addEventListener('blur', thumbKill);
     document.addEventListener('visibilitychange', ()=>{ if(document.hidden || document.visibilityState === 'hidden') thumbKill(); });   // on document (the event does not bubble in a synthetic dispatch); pagehide too
@@ -29089,6 +29250,7 @@ function bindInput(){
           if(stkId === null){
             rec.stk = true; stkId = rec.id; stkOx = t.clientX; stkOy = t.clientY; stkRx = 0; stkRy = 0; stkMoved = false;
             TH.active = true; TH.ox = stkOx; TH.oy = stkOy; TH.x = 0; TH.y = 0;
+            TiltCtl.clutch();   // N18 — bank mode: the roll NOW is neutral
             rec.show = setTimeout(()=>{ if(rec.stk && stkId === rec.id) stkDraw(rec.cx, rec.cy); }, 280);
             if(!stkRaf) stkRaf = requestAnimationFrame(stkLoop);
           }
@@ -29204,7 +29366,7 @@ function bindInput(){
         get the popup inside the lesson's grip card instead — no line.       */
     if(typeof DeviceOrientationEvent !== 'undefined'
        && typeof DeviceOrientationEvent.requestPermission === 'function'
-       && !OB.pending() && State.tilt) $('#allowNote').style.display = 'block';   // N17 — the motion popup is only asked for when tilt steering is on
+       && !OB.pending() && (State.tilt || State.tiltBank)) $('#allowNote').style.display = 'block';   // N17 — the motion popup is only asked for when tilt steering is on
     const ui = $('#touchUI'); ui.style.display = 'flex';
     $('#tFly').addEventListener('click', ()=>{ audio.resume(); toggleFly(); });
     $('#tPause').addEventListener('click', togglePause);
@@ -29264,7 +29426,8 @@ function bindInput(){
   $('#wDir').value = Math.round(WindSys.baseDir/DEG);               // §W5-E6 — reflect ?winddir=
   $('#pInvY').checked = State.invertY;
   $('#pTilt').checked = State.tilt;   // N17 — the Tilt steering row is a touch-glass thing: desktop never sees it
-  if(Input.hasTouch){ $('#rTilt').style.display = ''; $('#rRelevel').style.display = State.tilt ? '' : 'none'; }
+  $('#pTiltBank').checked = State.tiltBank;   // N18 — "Tilt to bank", same touch-only row logic as Tilt steering
+  if(Input.hasTouch){ $('#rTiltBank').style.display = ''; $('#rTilt').style.display = ''; $('#rPitch').style.display = ''; PitchAsk.syncRow(); $('#rRelevel').style.display = State.tilt ? '' : 'none'; }
   $('#aDrone').checked = !!State.musicV2;
   for(const b of $('#fpsSeg').children) b.classList.toggle('on', +b.dataset.f === State.fpscap);
   // a persisted session restores volume/music onto both the audio object and the panel
@@ -29312,11 +29475,26 @@ function bindInput(){
     if(box.checked){
       TiltCtl.browser(st=>{
         if(!box.checked) return;                           // un-ticked while the popup was up: leave it off
-        if(st === 'granted'){ TiltCtl.setTilt(true); saveSettings(); toast('tilt steering on — hold the iPad as you like, it levels to that pose'); }
+        if(st === 'granted'){ TiltCtl.setTilt(true); saveTiltChoice(); toast('tilt steering on — hold the iPad as you like, it levels to that pose'); }
         else TiltCtl.refused();
       });
-    } else { TiltCtl.setTilt(false); saveSettings(); toast('thumb steering — your left thumb steers'); }
+    } else { TiltCtl.setTilt(false); saveTiltChoice(); toast('thumb steering — your left thumb steers'); }
   });
+  /*  N18 — Tilt to bank: same permission gesture + refusal path as Tilt steering; mutually exclusive with it
+      (setTiltBank(true) switches full tilt off, setTilt(true) switches bank off — the other box and the save follow). */
+  $('#pTiltBank').addEventListener('change', e=>{
+    const box = e.target;
+    if(box.checked){
+      TiltCtl.browser(st=>{
+        if(!box.checked) return;                           // un-ticked while the popup was up
+        if(st === 'granted'){ TiltCtl.setTiltBank(true); saveTiltChoice(); toast('tilt to bank on — keep your left thumb down and roll the iPad to bank'); }
+        else TiltCtl.bankRefused();
+      });
+    } else { TiltCtl.setTiltBank(false); saveTiltChoice(); toast('tilt to bank off — your left thumb steers'); }
+  });
+  /*  N18 D10 — "Thumb up": dives (+1, classic stick) or climbs (−1).  A click sets, saves, applies and answers any open question. */
+  $('#pPitchDive').addEventListener('click', ()=>{ PitchAsk.end(); PitchAsk.choose(1); toast('thumb up dives the nose'); });
+  $('#pPitchClimb').addEventListener('click', ()=>{ PitchAsk.end(); PitchAsk.choose(-1); toast('thumb up lifts the nose'); });
   $('#pRelevel').addEventListener('click', ()=>{ TiltCtl.cal(); toast('tilt neutral re-set'); });
   /*  A stored setting that changes the CONTROLS has to be recoverable without
       knowing it exists: one click here clears the store and restores every
@@ -29326,6 +29504,8 @@ function bindInput(){
     State.sens = 1; State.invertY = false; audio.vol = 0.7; audio.music = true;
     State.musicV2 = false;
     TiltCtl.setTilt(false);   // N17 — tilt steering returns OFF (and the box, the re-level row and the hint strings follow)
+    TiltCtl.setTiltBank(false);   // N18 — tilt to bank returns OFF too
+    saveTiltChoice(true); pitchSaved = 0; PitchAsk.answered = false; PitchAsk.store(0); PitchAsk.end(); PitchAsk.apply(QS.has('thumbpitch') ? (+QS.get('thumbpitch') < 0 ? -1 : 1) : 1); PitchAsk.syncRow();   // N18 D8/D10 — pitch back to not chosen (a ?thumbpitch pin stays)
     $('#pSens').value = '100'; $('#pSensV').textContent = '1.00';
     $('#pInvY').checked = false;
     $('#aVol').value = '70'; $('#aVolV').textContent = '70';
@@ -29393,6 +29573,11 @@ function bindInput(){
       const askAPI = typeof DeviceOrientationEvent !== 'undefined'
         && typeof DeviceOrientationEvent.requestPermission === 'function';
       if(!askAPI || !OB.pending()) TiltCtl.browser(s=>{ if(s !== 'granted' && State.tilt) TiltCtl.refused(true); });   // refused at the entry tap: back to thumbs, never a dead glider
+    }
+    else if(Input.hasTouch && State.tiltBank){   // N18 — tilt to bank: the same entry-tap motion ask (deferred to the lesson's grip card when one is pending); no neutral here, the thumb's touch-down is the neutral
+      const askAPI = typeof DeviceOrientationEvent !== 'undefined'
+        && typeof DeviceOrientationEvent.requestPermission === 'function';
+      if(!askAPI || !OB.pending()) TiltCtl.browser(s=>{ if(s !== 'granted' && State.tiltBank) TiltCtl.bankRefused(true); });   // refused: thumbs for this session, the saved setting stays on
     }
     /*  §M1e — glass plays truly fullscreen: the entry gesture is the ONE moment
         the OS lets a page hide its clock/battery furniture (the Fullscreen API
